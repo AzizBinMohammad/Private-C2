@@ -22,6 +22,7 @@ const (
 	PermEngagementManage Permission = "engagement.manage"
 	PermAuditRead     Permission = "audit.read"
 	PermAdminManage   Permission = "admin.manage"
+	PermOTAssess      Permission = "ot.assess"
 )
 
 var rolePermissions = map[string][]Permission{
@@ -31,7 +32,7 @@ var rolePermissions = map[string][]Permission{
 		PermListenerRead, PermListenerWrite,
 		PermPayloadBuild, PermTaskExecute,
 		PermEngagementManage, PermAuditRead,
-		PermAdminManage,
+		PermAdminManage, PermOTAssess,
 	},
 	"operator": {
 		PermSessionRead, PermSessionWrite,
@@ -39,6 +40,11 @@ var rolePermissions = map[string][]Permission{
 		PermListenerRead, PermListenerWrite,
 		PermPayloadBuild, PermTaskExecute,
 		PermAuditRead,
+	},
+	"ot-operator": {
+		PermSessionRead, PermSessionWrite,
+		PermListenerRead, PermEngagementManage,
+		PermAuditRead, PermOTAssess,
 	},
 	"builder": {
 		PermPayloadBuild,

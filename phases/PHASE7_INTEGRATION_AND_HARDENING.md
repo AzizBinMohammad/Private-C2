@@ -157,6 +157,23 @@ docker-compose up -d
 curl -k https://localhost:9090/healthz
 ```
 
+### 7.7 OT Integration Tests
+**File: `tests/integration/ot_assessment_test.go`**
+- OT safety interlocks: write command → hard block, verified per protocol
+- Dual authorization: scan without OT token → rejected
+- Kill switch: activate mid-OT-scan → all OT connections drop
+- Rate limiting: burst of OT queries → enforced inter-packet delay
+- Hidden interface: operator without `ot.assess` → OT service not visible
+- Scope: OT scan against out-of-scope target → blocked
+- Safety-critical tag: query safety-rated device → read-only interlock
+- Full details in `PHASE8_OT_INTERFACE.md`
+
+## Dependencies
+- All previous phases (1-6) must be complete
+- Phase 8 (OT) can be tested in parallel with Phase 7 integration work
+- External: `docker`, `docker-compose`, `golangci-lint`, `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc`
+- OT testing: Modbus simulator (ModRSsim2), OPC UA test server (open62541)
+
 ## Definition of Done
 - [ ] All unit tests pass
 - [ ] All integration tests pass
@@ -170,3 +187,7 @@ curl -k https://localhost:9090/healthz
 - [ ] Audit trail complete and verifiable
 - [ ] No hardcoded secrets
 - [ ] TLS 1.3 only
+- [ ] OT interface hidden from standard enumeration
+- [ ] OT read-only interlocks verified per protocol
+- [ ] OT dual-auth gate tested
+- [ ] OT rate limiting validated against simulator

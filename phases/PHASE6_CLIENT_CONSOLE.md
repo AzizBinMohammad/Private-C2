@@ -137,7 +137,15 @@ Build the operator-facing CLI client with interactive console, tab completion, c
 - Phase 1: Server gRPC API, models (DONE)
 - Phase 3: Transport layer for connection
 - Phase 5: Build pipeline for payload generation commands
+- Phase 8: OT interface commands (hidden, loaded only with `ot.assess` permission)
 - External: `github.com/desertbit/grumble` or `github.com/c-bata/go-prompt`, `github.com/olekukonko/tablewriter`, `github.com/spf13/cobra`
+
+## OT Integration
+The hidden OT console (`client/cli/commands/ot.go` from Phase 8) is NOT registered in the standard command tree. It is loaded dynamically only when:
+1. The operator's role includes `ot.assess` permission
+2. The active engagement has `ot_authorized: true`
+3. The operator enters `ot-mode` with a valid dual-auth token
+See `PHASE8_OT_INTERFACE.md` for the full OT command set.
 
 ## Verification
 ```bash

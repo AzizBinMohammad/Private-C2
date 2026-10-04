@@ -129,3 +129,6 @@ go test ./implant/modules/... -v
 go test ./implant/safety/... -v
 go vet ./implant/...
 ```
+
+## Next
+Phase 8 (OT/ICS Interface) builds on the task executor and safety layer from this phase. The OT module (`implant/modules/ot/`) uses the same task registration pattern and safety pre-flight checks defined here, extended with OT-specific interlocks (dual-auth, read-only protocol enforcement, rate limiting for real-time control networks). See `PHASE8_OT_INTERFACE.md`.
