@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+  # ---- PostgreSQL ----
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: private_c2
+      POSTGRES_USER: pc2
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pc2 -d private_c2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Private-C2 Server ----
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "31337:31337"   # gRPC
+      - "9090:9090"     # Metrics / health
+    environment:
+      PC2_GRPC_ADDR: ":31337"
+      PC2_METRICS_ADDR: ":9090"
+      PC2_DB_DIALECT: "postgres"
+      PC2_DB_DSN: "host=postgres user=pc2 password=${POSTGRES_PASSWORD:-changeme} dbname=private_c2 sslmode=disable"
+      PC2_CA_CERT_PATH: "/etc/private-c2/certs/ca-cert.pem"
+      PC2_SERVER_CERT_PATH: "/etc/private-c2/certs/server-cert.pem"
+      PC2_SERVER_KEY_PATH: "/etc/private-c2/certs/server-key.pem"
+      PC2_LOG_LEVEL: "info"
+      PC2_AUDIT_FILE_PATH: "/var/log/private-c2/audit.log"
+    volumes:
+      - ./certs:/etc/private-c2/certs:ro
+      - server_data:/var/lib/private-c2
+      - server_logs:/var/log/private-c2
+    networks:
+      - backend
+
+volumes:
+  pg_data:
+  server_data:
+  server_logs:
+
+networks:
+  backend:
+    driver: bridge
