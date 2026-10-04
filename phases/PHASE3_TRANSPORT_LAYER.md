@@ -1,6 +1,20 @@
 # Phase 3: Transport Layer
 
-## Status: NOT STARTED
+## Status: DONE
+
+## What Was Built
+- `server/c2/profile/profile.go` — C2Profile with HTTP/DNS configs, jitter, validation
+- `server/c2/listener/listener.go` — Base Listener interface + BaseListener
+- `server/c2/listener/mtls.go` — mTLS TCP listener with bidirectional framed streaming
+- `server/c2/listener/https.go` — HTTP/2 TLS with C2 profile routing
+- `server/c2/listener/dns.go` — Authoritative DNS server (UDP+TCP) with data encoding
+- `server/c2/listener/wireguard.go` — WireGuard tunnel stub
+- `implant/transport/mtls/mtls.go` — TLS 1.3 dialer with backoff reconnect
+- `implant/transport/https/https.go` — HTTP client with proxy, domain fronting
+- `implant/transport/dns/dns.go` — DNS transport with multi-record queries
+- `implant/transport/dns/encoding.go` — Base32 encoding, chunk/reassemble
+- `implant/transport/wireguard/wireguard.go` — WireGuard client stub
+- `implant/transport/pivot/pivot.go` — TCP relay + named pipe (Windows stub)
 
 ## Objective
 Implement all transport protocols for both server-side listeners and implant-side clients, with C2 profile support for traffic shaping.

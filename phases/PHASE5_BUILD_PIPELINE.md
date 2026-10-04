@@ -1,6 +1,17 @@
 # Phase 5: Build Pipeline & Payload Generation
 
-## Status: NOT STARTED
+## Status: DONE
+
+## What Was Built
+- `server/build/config.go` — BuildConfig with Validate() using pkg/platform matrix
+- `server/build/stages/configure.go` — Generate implant config source, embed crypto keys
+- `server/build/stages/compile.go` — Cross-compile via os/exec go build with GOOS/GOARCH
+- `server/build/stages/postprocess.go` — Output format transformations (exe, dll, shellcode, shared)
+- `server/build/stages/obfuscate.go` — Assessment-grade string encryption, symbol rename
+- `server/build/stages/stager.go` — Download-and-execute stager generation
+- `server/build/queue/queue.go` — Concurrent build queue with job tracking
+- `server/build/queue/worker.go` — Worker goroutine with timeout and cleanup
+- `server/store/repository/payloads.go` — PayloadArtifact repository
 
 ## Objective
 Build the cross-compilation pipeline that generates implant binaries for all supported platforms, with configurable features, transports, and output formats.

@@ -1,6 +1,41 @@
 # Phase 8: Covert OT/ICS Assessment Interface
 
-## Status: NOT STARTED
+## Status: DONE
+
+## What Was Built
+**Implant OT core (15 files in `implant/modules/ot/`):**
+- `ot.go` — OTModule with safety interlocks (kill switch, rate limiter, watchdog, connection tracker, pre-flight checks)
+- `discovery.go` — Passive/active OT asset discovery with protocol probing
+- `capture.go` — Passive traffic capture, comm matrix, polling interval detection
+- `fingerprint.go` — Multi-source fingerprinting (MAC OUI, HTTP, TLS), CVE cross-reference
+- `topology.go` — Purdue model topology mapping, GraphViz DOT export
+- `credentials.go` — Single-attempt default credential testing, vendor default database
+- `vulnscan.go` — Offline CVE correlation, insecure protocol detection, risk scoring
+- `segmentation.go` — Purdue segmentation analysis, VLAN detection, cross-zone flow analysis
+- `wireless.go` — WirelessHART/ISA100.11a/WiFi/Zigbee/BLE detection
+- `historian.go` — Historian/SCADA detection (OSIsoft PI, Wonderware, GE Proficy, Ignition)
+- `hmi.go` — HMI web interface assessment (HTTP GET only)
+- `plclogic.go` — PLC program metadata reader (S7/Modbus/EtherNet/IP)
+- `serial.go` — Serial-to-Ethernet converter and fieldbus gateway detection
+- `compliance.go` — IEC 62443, NIST SP 800-82, NERC CIP compliance gap analysis
+- `reporting.go` — JSON/Markdown/CSV/MITRE ATT&CK Navigator report generation
+
+**Protocol clients (17 files in `implant/modules/ot/protocols/`):**
+- `common.go`, `modbus.go`, `opcua.go`, `s7comm.go`, `dnp3.go`, `ethernetip.go`, `bacnet.go`
+- `iec104.go`, `iec61850.go`, `profinet.go`, `hart.go`, `mqtt.go`
+- `coap.go`, `fins.go`, `melsec.go`, `pcworx.go`, `crimson.go`
+
+**Server (4 files):**
+- `server/store/models/ot.go` — 10 GORM models
+- `server/store/repository/ot.go` — OTRepository with CRUD and bulk operations
+- `server/api/grpc/ot.go` — OTServer (hidden, not reflected), event publishing, permission checks
+- `server/api/middleware/ot_auth.go` — OTAuthManager with dual-auth, time-limited scoped tokens
+
+**Client (1 file):**
+- `client/cli/commands/ot.go` — 15 subcommands (discover, scan, capture, topology, compliance, report, etc.)
+
+**Proto (1 file):**
+- `proto/v1/ot.proto` — OTService with 17 RPCs, all message types
 
 ## Classification: HIDDEN INTERFACE
 This module is isolated from the main C2 UI surface. It is accessible only through a separate authentication gate (OT-operator role + engagement with OT scope authorization). The interface does not appear in standard command listings, help output, or tab completion unless the operator holds the `ot.assess` permission.

@@ -1,6 +1,18 @@
 # Phase 4: Implant Task Modules
 
-## Status: NOT STARTED
+## Status: DONE
+
+## What Was Built
+- `implant/task/executor.go` — Task dispatcher with timeout, concurrency semaphore
+- `implant/task/registry.go` — Module registry mapping task types to handlers
+- `implant/modules/shell/shell.go` + `shell_unix.go` + `shell_windows.go` — Platform-specific shell execution
+- `implant/modules/filesystem/filesystem.go` — ls, cat, upload, download (with DataQuota), rm, mkdir, cp, mv, pwd, cd
+- `implant/modules/process/process.go` + platform variants — Process enumeration (Linux /proc, Windows/Darwin stubs)
+- `implant/modules/network/network.go` — ifconfig, netstat, portscan (scope-checked), resolve
+- `implant/modules/screenshot/screenshot.go` — Screenshot capture stub
+- `implant/safety/safety.go` — SafetyChecker with kill switch, kill date, scope, quota checks
+- `implant/safety/allowlist.go` — Command allowlist for simulation mode
+- `implant/evasion/syscalls/syscalls.go` + `syscalls_windows.go` + `syscalls_default.go` — Syscaller interface with Windows NT syscall stubs
 
 ## Objective
 Implement the implant-side task execution engine and all core operational modules (shell, filesystem, process, network). All modules operate within engagement scope and respect kill switch state.

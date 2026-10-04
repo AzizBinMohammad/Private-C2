@@ -1,6 +1,23 @@
 # Phase 6: Client Console & CLI
 
-## Status: NOT STARTED
+## Status: DONE
+
+## What Was Built
+- `client/transport/config.go` — Operator config with JSON serialization
+- `client/transport/grpc.go` — gRPC client interface (stub pattern)
+- `client/console/context.go` — Console context (engagement, session, beacon)
+- `client/console/output.go` — Table formatting, ANSI colors, JSON mode
+- `client/console/events.go` — Background event listener with 14 notification types
+- `client/console/console.go` — Interactive REPL with bufio.Scanner
+- `client/cli/commands/commands.go` — Command struct, registry, helpers
+- `client/cli/commands/sessions.go` — sessions commands (list, interact, lock, unlock, kill)
+- `client/cli/commands/beacons.go` — beacons commands (list, interact, watch)
+- `client/cli/commands/listeners.go` — listeners commands (list, start, stop, profiles)
+- `client/cli/commands/payloads.go` — generate/payloads commands
+- `client/cli/commands/tasks.go` — shell, upload, download, ls, ps, etc.
+- `client/cli/commands/engagement.go` — engagements commands (list, create, use, killswitch, scope)
+- `client/cli/commands/audit.go` — audit commands (query, export, verify)
+- `client/cli/commands/admin.go` — operators/server commands
 
 ## Objective
 Build the operator-facing CLI client with interactive console, tab completion, command framework, and gRPC connection to the server.

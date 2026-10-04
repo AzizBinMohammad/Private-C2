@@ -1,6 +1,15 @@
 # Phase 2: Unit Tests & Implant Runtime Skeleton
 
-## Status: NOT STARTED
+## Status: DONE
+
+## What Was Built
+- 14 test files with 49 unit tests covering all `pkg/` packages (crypto, envelope, platform, audit, engagement)
+- `implant/runtime/config.go` — Implant configuration struct (server URLs, implant ID, mode, sleep interval, jitter, kill date, encryption keys)
+- `implant/runtime/runtime.go` — Main implant loop with session (persistent) and beacon (interval-based) modes
+- `implant/runtime/register.go` — Registration handshake with system info collection
+- `implant/runtime/sysinfo.go` — Cross-platform system info with build-tagged implementations (`sysinfo_linux.go`, `sysinfo_windows.go`, `sysinfo_darwin.go`, `sysinfo_default.go`)
+- `implant/transport/transport.go` — Transport interface (Connect, Send, Recv, Close, Name)
+- `implant/transport/manager.go` — Transport manager with fallback chain, health scoring, backoff, re-promotion
 
 ## Objective
 Add comprehensive unit tests for all `pkg/` packages, build the implant runtime skeleton, and create the implant-side transport interface layer.

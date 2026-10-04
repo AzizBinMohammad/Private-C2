@@ -1,6 +1,24 @@
 # Phase 7: Integration Testing, Security Hardening & Deployment
 
-## Status: NOT STARTED
+## Status: DONE
+
+## What Was Built
+- `pkg/crypto/wipe.go` — Wipe(b []byte) with atomic store to prevent optimization
+- `server/core/security.go` — ValidateID, ValidateName, SanitizePath, ValidateIP, ValidateCIDR
+- `server/config/config.go` — ServerConfig with Load() from env vars, Validate()
+- `Dockerfile` — Multi-stage build, alpine runtime, non-root user
+- `docker-compose.yml` — Server + PostgreSQL 16
+- `Makefile` — build, test, lint, docker, cross-compile targets
+- `scripts/setup-ca.sh` — Generate CA and server certificates
+- `scripts/add-operator.sh` — Generate operator client certificate
+- `tests/go.mod` — Integration test module
+- `tests/integration/session_lifecycle_test.go` — 3 test stubs
+- `tests/integration/beacon_lifecycle_test.go` — 3 test stubs
+- `tests/integration/engagement_scope_test.go` — 4 test stubs
+- `tests/integration/build_pipeline_test.go` — 4 test stubs
+- `tests/integration/transport_fallback_test.go` — 3 test stubs
+- `tests/integration/multi_operator_test.go` — 4 test stubs
+- `tests/integration/ot_assessment_test.go` — 3 test stubs
 
 ## Objective
 End-to-end integration tests, security audit of the codebase, deployment packaging, and documentation.
