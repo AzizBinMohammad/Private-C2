@@ -82,6 +82,9 @@ DNS.1 = ${SERVER_CN}
 DNS.2 = localhost
 IP.1  = 127.0.0.1
 IP.2  = ::1
+IP.3  = 0.0.0.0
+# Add your LAN IP here, e.g.:
+# IP.4  = 192.168.1.100
 EOF
 
     info "Signing server certificate with CA (valid ${SERVER_DAYS} days)"

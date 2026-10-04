@@ -2,9 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"flag"
+	"fmt"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -12,28 +21,28 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/azizbinmohammad/private-c2/pkg/crypto"
-	"github.com/azizbinmohammad/private-c2/server/api/middleware"
-	"github.com/azizbinmohammad/private-c2/server/core"
+	"github.com/azizbinmohammad/private-c2/server/api/httpapi"
+	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store"
-	"github.com/azizbinmohammad/private-c2/server/store/repository"
 	"github.com/azizbinmohammad/private-c2/server/telemetry"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 func main() {
-	grpcAddr := flag.String("grpc-addr", ":31337", "gRPC listen address")
+	listenAddr := flag.String("listen", ":4444", "Implant TLS listener address")
+	apiAddr := flag.String("api", "127.0.0.1:8080", "Operator HTTP API address")
 	metricsAddr := flag.String("metrics-addr", ":9090", "Metrics/health listen address")
-	dbDialect := flag.String("db-dialect", "sqlite", "Database dialect (sqlite, postgres)")
-	dbDSN := flag.String("db-dsn", "private-c2.db", "Database connection string")
+	certFile := flag.String("cert", "", "Server certificate PEM file")
+	keyFile := flag.String("key", "", "Server private key PEM file")
+	caFile := flag.String("ca", "", "CA certificate PEM for verifying implants (optional)")
+	dbPath := flag.String("db", "pc2.db", "SQLite database path")
 	flag.Parse()
 
 	log.Println("Starting Private-C2 server")
 
+	// --- Database ---
 	dbCfg := store.DefaultConfig()
-	dbCfg.Dialect = *dbDialect
-	dbCfg.DSN = *dbDSN
+	dbCfg.Dialect = "sqlite"
+	dbCfg.DSN = *dbPath
 
 	db, err := store.Open(dbCfg)
 	if err != nil {
@@ -45,114 +54,188 @@ func main() {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 	log.Println("Database migrated")
+	_ = db // available for future persistence wiring
 
-	eventBus := core.NewEventBus()
-	sessionMgr := core.NewSessionManager(eventBus, 30*time.Second, 2*time.Minute)
-
-	operatorRepo := repository.NewOperatorRepository(db)
-	_ = operatorRepo
-
-	ca, _, err := crypto.NewCertificateAuthority("Private-C2 Root CA", 10*365*24*time.Hour)
+	// --- TLS configuration ---
+	tlsConfig, err := buildTLSConfig(*certFile, *keyFile, *caFile)
 	if err != nil {
-		log.Fatalf("Failed to create CA: %v", err)
+		log.Fatalf("TLS setup failed: %v", err)
 	}
 
-	serverCert, serverKey, err := ca.IssueCertificate("private-c2-server", 365*24*time.Hour)
+	// --- Core C2 server ---
+	implantServer := c2.NewImplantServer()
+
+	// --- TLS listener for implants ---
+	tlsListener, err := tls.Listen("tcp", *listenAddr, tlsConfig)
 	if err != nil {
-		log.Fatalf("Failed to issue server certificate: %v", err)
+		log.Fatalf("Failed to listen on %s: %v", *listenAddr, err)
 	}
-
-	tlsCert, err := tls.X509KeyPair(serverCert, serverKey)
-	if err != nil {
-		log.Fatalf("Failed to parse TLS key pair: %v", err)
-	}
-
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    ca.CertPool(),
-		MinVersion:   tls.VersionTLS13,
-	}
-
-	rateLimiter := middleware.NewRateLimiter(100, 200)
-
-	operatorLookup := func(ctx context.Context, cn string) (*middleware.OperatorInfo, error) {
-		op, err := operatorRepo.GetByName(cn)
-		if err != nil {
-			return nil, err
-		}
-		return &middleware.OperatorInfo{
-			ID:   op.ID,
-			Name: op.Name,
-			Role: op.Role,
-		}, nil
-	}
-
-	grpcServer := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.ChainUnaryInterceptor(
-			middleware.AuthUnaryInterceptor(operatorLookup),
-			middleware.RBACUnaryInterceptor(),
-			middleware.RateLimitUnaryInterceptor(rateLimiter),
-		),
-		grpc.ChainStreamInterceptor(
-			middleware.AuthStreamInterceptor(operatorLookup),
-			middleware.RBACStreamInterceptor(),
-			middleware.RateLimitStreamInterceptor(rateLimiter),
-		),
-	)
-
-	_ = grpcServer
-
-	telemetry.Init()
-	healthChecker := telemetry.NewHealthChecker()
-
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", telemetry.Handler())
-	mux.HandleFunc("/healthz", healthChecker.Handler())
-
-	metricsServer := &http.Server{
-		Addr:    *metricsAddr,
-		Handler: mux,
-	}
+	log.Printf("Implant TLS listener on %s", *listenAddr)
 
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			sessionMgr.RunHealthCheck()
+		for {
+			conn, err := tlsListener.Accept()
+			if err != nil {
+				// Check if listener was closed (shutdown).
+				select {
+				case <-shutdownCh:
+					return
+				default:
+				}
+				log.Printf("Accept error: %v", err)
+				continue
+			}
+			go implantServer.HandleConnection(conn)
 		}
 	}()
 
+	// --- Operator HTTP API ---
+	apiRouter := httpapi.NewRouter(implantServer)
+	apiServer := &http.Server{
+		Addr:    *apiAddr,
+		Handler: apiRouter,
+	}
+
 	go func() {
-		log.Printf("Metrics/health server listening on %s", *metricsAddr)
+		log.Printf("Operator HTTP API on %s", *apiAddr)
+		if err := apiServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("API server error: %v", err)
+		}
+	}()
+
+	// --- Metrics/health server ---
+	telemetry.Init()
+	healthChecker := telemetry.NewHealthChecker()
+
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", telemetry.Handler())
+	metricsMux.HandleFunc("/healthz", healthChecker.Handler())
+
+	metricsServer := &http.Server{
+		Addr:    *metricsAddr,
+		Handler: metricsMux,
+	}
+
+	go func() {
+		log.Printf("Metrics/health server on %s", *metricsAddr)
 		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Metrics server error: %v", err)
 		}
 	}()
 
-	lis, err := net.Listen("tcp", *grpcAddr)
-	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", *grpcAddr, err)
-	}
-
-	go func() {
-		log.Printf("gRPC server listening on %s", *grpcAddr)
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Fatalf("gRPC server error: %v", err)
-		}
-	}()
-
+	// --- Graceful shutdown ---
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigChan
 	log.Printf("Received signal %v, shutting down", sig)
 
-	grpcServer.GracefulStop()
+	close(shutdownCh)
+	tlsListener.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	apiServer.Shutdown(ctx)
 	metricsServer.Shutdown(ctx)
 
 	log.Println("Server stopped")
+}
+
+// shutdownCh signals the accept loop to stop.
+var shutdownCh = make(chan struct{})
+
+// buildTLSConfig constructs the TLS configuration. If certFile/keyFile are
+// empty, a self-signed certificate is generated and its fingerprint printed.
+func buildTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
+	var tlsCert tls.Certificate
+
+	if certFile != "" && keyFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("loading cert/key: %w", err)
+		}
+		tlsCert = cert
+		log.Printf("Loaded TLS certificate from %s", certFile)
+	} else {
+		log.Println("No --cert/--key provided, generating self-signed certificate")
+		cert, err := generateSelfSigned()
+		if err != nil {
+			return nil, fmt.Errorf("generating self-signed cert: %w", err)
+		}
+		tlsCert = cert
+	}
+
+	cfg := &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	// If a CA file is provided, add it to the config but do NOT require
+	// client certs (server-side TLS only, no mTLS).
+	if caFile != "" {
+		caPEM, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA cert: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+		cfg.ClientCAs = pool
+		// Still NoClientCert -- the CA is available for optional verification.
+		cfg.ClientAuth = tls.NoClientCert
+		log.Printf("Loaded CA certificate from %s (client auth not required)", caFile)
+	}
+
+	return cfg, nil
+}
+
+// generateSelfSigned creates an ephemeral self-signed TLS certificate and
+// prints its SHA-256 fingerprint so operators can verify it.
+func generateSelfSigned() (tls.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			CommonName:   "private-c2-server",
+			Organization: []string{"Private-C2"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"localhost", "private-c2-server"},
+		IPAddresses: []net.IP{
+			net.ParseIP("127.0.0.1"),
+			net.ParseIP("::1"),
+			net.IPv4zero,
+		},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	// Print fingerprint.
+	fp := sha256.Sum256(certDER)
+	log.Printf("Self-signed certificate fingerprint (SHA-256): %x", fp)
+
+	return tls.X509KeyPair(certPEM, keyPEM)
 }

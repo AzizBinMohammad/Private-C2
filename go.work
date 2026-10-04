@@ -8,4 +8,5 @@ use (
 	./cmd/server
 	./cmd/client
 	./cmd/builder
+	./cmd/implant
 )
