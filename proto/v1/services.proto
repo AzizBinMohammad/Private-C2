@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package privatec2.v1;
+
+option go_package = "github.com/azizbinmohammad/private-c2/pkg/proto/v1/rpcpb";
+
+import "proto/v1/common.proto";
+import "proto/v1/client.proto";
+import "proto/v1/implant.proto";
+import "proto/v1/engagement.proto";
+import "proto/v1/audit.proto";
+
+service OperatorService {
+  rpc GetSessions(Empty) returns (Sessions);
+  rpc GetSession(Session) returns (Session);
+  rpc KillSession(Session) returns (Response);
+  rpc LockSession(Session) returns (Response);
+  rpc UnlockSession(Session) returns (Response);
+
+  rpc GetBeacons(Empty) returns (Beacons);
+  rpc GetBeacon(Beacon) returns (Beacon);
+
+  rpc StartListener(Listener) returns (Listener);
+  rpc StopListener(Listener) returns (Response);
+  rpc GetListeners(Empty) returns (Listeners);
+
+  rpc GeneratePayload(PayloadConfig) returns (BuildJob);
+  rpc GetBuildJob(BuildJob) returns (BuildJob);
+  rpc CancelBuildJob(BuildJob) returns (Response);
+  rpc GetArtifacts(Empty) returns (PayloadArtifacts);
+  rpc RevokeArtifact(PayloadArtifact) returns (Response);
+
+  rpc ExecuteTask(TaskRequest) returns (TaskResponse);
+  rpc OpenShell(ShellRequest) returns (stream ShellResponse);
+
+  rpc ListFiles(FileRequest) returns (FileResponse);
+  rpc ReadFile(FileRequest) returns (FileResponse);
+  rpc UploadFile(FileRequest) returns (Response);
+  rpc DownloadFile(FileRequest) returns (FileResponse);
+
+  rpc GetProcessList(ProcessListRequest) returns (ProcessListResponse);
+  rpc GetNetworkInfo(Empty) returns (NetworkInfo);
+  rpc TakeScreenshot(ScreenshotRequest) returns (ScreenshotResponse);
+}
+
+service EngagementService {
+  rpc CreateEngagement(Engagement) returns (Engagement);
+  rpc GetEngagement(Engagement) returns (Engagement);
+  rpc UpdateEngagement(Engagement) returns (Engagement);
+  rpc ListEngagements(Empty) returns (stream Engagement);
+  rpc ActivateKillSwitch(KillSwitchRequest) returns (Response);
+  rpc CheckScope(ScopeCheckRequest) returns (ScopeCheckResponse);
+}
+
+service AuditService {
+  rpc QueryAuditLog(AuditQuery) returns (AuditEntries);
+  rpc StreamAuditLog(AuditQuery) returns (stream AuditEntry);
+}
+
+service AdminService {
+  rpc GetOperators(Empty) returns (stream OperatorConfig);
+  rpc CreateOperator(OperatorConfig) returns (OperatorConfig);
+  rpc UpdateOperator(OperatorConfig) returns (OperatorConfig);
+  rpc DeleteOperator(OperatorConfig) returns (Response);
+  rpc GetRoles(Empty) returns (Roles);
+  rpc CreateRole(Role) returns (Role);
+}
+
+service ImplantService {
+  rpc Register(Register) returns (Empty);
+  rpc Ping(Ping) returns (Ping);
+  rpc GetTasks(Empty) returns (stream TaskRequest);
+  rpc SendTaskResult(TaskResponse) returns (Empty);
+  rpc CheckKillSwitch(KillSwitchCheck) returns (KillSwitchStatus);
+}

@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package privatec2.v1;
+
+option go_package = "github.com/azizbinmohammad/private-c2/pkg/proto/v1/engagementpb";
+
+import "google/protobuf/timestamp.proto";
+import "proto/v1/common.proto";
+
+message Engagement {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string authorization_ref = 4;
+  Scope scope = 5;
+  TimeWindow time_window = 6;
+  repeated string authorized_techniques = 7;
+  DataHandling data_handling = 8;
+  string emergency_contact = 9;
+  google.protobuf.Timestamp created_at = 10;
+  string created_by = 11;
+  EngagementStatus status = 12;
+  AdversaryProfile profile = 13;
+}
+
+message Scope {
+  repeated string cidr_ranges = 1;
+  repeated string hostnames = 2;
+  repeated string domains = 3;
+  repeated string excluded_hosts = 4;
+}
+
+message TimeWindow {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  repeated string allowed_hours = 3;
+  string timezone = 4;
+}
+
+message DataHandling {
+  DataCollectionLevel collection_level = 1;
+  int64 exfil_limit_bytes = 2;
+  bool encrypt_at_rest = 3;
+  int32 retention_days = 4;
+}
+
+enum DataCollectionLevel {
+  DATA_COLLECTION_UNSPECIFIED = 0;
+  DATA_COLLECTION_NONE = 1;
+  DATA_COLLECTION_METADATA_ONLY = 2;
+  DATA_COLLECTION_LIMITED = 3;
+  DATA_COLLECTION_FULL = 4;
+}
+
+enum EngagementStatus {
+  ENGAGEMENT_STATUS_UNSPECIFIED = 0;
+  ENGAGEMENT_STATUS_PLANNING = 1;
+  ENGAGEMENT_STATUS_ACTIVE = 2;
+  ENGAGEMENT_STATUS_PAUSED = 3;
+  ENGAGEMENT_STATUS_COMPLETED = 4;
+  ENGAGEMENT_STATUS_TERMINATED = 5;
+}
+
+message AdversaryProfile {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated string techniques = 4;
+  repeated string allowed_commands = 5;
+  repeated string blocked_commands = 6;
+  int32 max_sessions = 7;
+  bool safe_mode = 8;
+  string kill_switch_url = 9;
+  NoiseLevel noise_level = 10;
+}
+
+enum NoiseLevel {
+  NOISE_UNSPECIFIED = 0;
+  NOISE_STEALTH = 1;
+  NOISE_NORMAL = 2;
+  NOISE_NOISY = 3;
+  NOISE_ATOMIC = 4;
+}
+
+message ScopeCheckRequest {
+  string engagement_id = 1;
+  string target_host = 2;
+  int32 target_port = 3;
+}
+
+message ScopeCheckResponse {
+  bool in_scope = 1;
+  string reason = 2;
+}
+
+message KillSwitchRequest {
+  string engagement_id = 1;
+  string reason = 2;
+  string operator_id = 3;
+}

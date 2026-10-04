@@ -1,0 +1,208 @@
+syntax = "proto3";
+
+package privatec2.v1;
+
+option go_package = "github.com/azizbinmohammad/private-c2/pkg/proto/v1/clientpb";
+
+import "google/protobuf/timestamp.proto";
+import "proto/v1/common.proto";
+
+message Session {
+  string id = 1;
+  string hostname = 2;
+  string username = 3;
+  string os = 4;
+  string arch = 5;
+  string remote_addr = 6;
+  TransportType transport = 7;
+  ImplantMode mode = 8;
+  SessionHealth health = 9;
+  string engagement_id = 10;
+  string locked_by = 11;
+  google.protobuf.Timestamp connected_at = 12;
+  google.protobuf.Timestamp last_checkin = 13;
+  string implant_id = 14;
+  repeated string tags = 15;
+  int32 pid = 16;
+  string process_name = 17;
+  string domain = 18;
+  bool elevated = 19;
+}
+
+message Sessions {
+  repeated Session sessions = 1;
+}
+
+message Beacon {
+  string id = 1;
+  string hostname = 2;
+  string username = 3;
+  string os = 4;
+  string arch = 5;
+  string remote_addr = 6;
+  TransportType transport = 7;
+  string engagement_id = 8;
+  int64 interval_ms = 9;
+  int32 jitter_pct = 10;
+  google.protobuf.Timestamp next_checkin = 11;
+  google.protobuf.Timestamp last_checkin = 12;
+  string implant_id = 13;
+  repeated string tags = 14;
+}
+
+message Beacons {
+  repeated Beacon beacons = 1;
+}
+
+message Listener {
+  string id = 1;
+  TransportType type = 2;
+  string bind_addr = 3;
+  int32 port = 4;
+  string engagement_id = 5;
+  string c2_profile_id = 6;
+  ListenerStatus status = 7;
+  int32 active_connections = 8;
+  google.protobuf.Timestamp started_at = 9;
+}
+
+enum ListenerStatus {
+  LISTENER_STATUS_UNSPECIFIED = 0;
+  LISTENER_STATUS_STARTING = 1;
+  LISTENER_STATUS_ACTIVE = 2;
+  LISTENER_STATUS_STOPPING = 3;
+  LISTENER_STATUS_STOPPED = 4;
+  LISTENER_STATUS_ERROR = 5;
+}
+
+message Listeners {
+  repeated Listener listeners = 1;
+}
+
+message PayloadConfig {
+  TargetPlatform target = 1;
+  ImplantConfig implant = 2;
+  repeated TransportConfig transports = 3;
+  FeatureConfig features = 4;
+  EvasionConfig evasion = 5;
+  OutputConfig output = 6;
+  string engagement_id = 7;
+  string c2_profile_id = 8;
+}
+
+message ImplantConfig {
+  ImplantMode mode = 1;
+  int64 beacon_interval_ms = 2;
+  int32 beacon_jitter_pct = 3;
+  int32 max_connection_errors = 4;
+  int64 reconnect_interval_ms = 5;
+  google.protobuf.Timestamp expiry = 6;
+}
+
+message TransportConfig {
+  TransportType type = 1;
+  int32 priority = 2;
+  string callback_host = 3;
+  int32 callback_port = 4;
+  map<string, string> options = 5;
+}
+
+message FeatureConfig {
+  bool interactive_shell = 1;
+  bool process_injection = 2;
+  bool screen_capture = 3;
+  bool registry_access = 4;
+  bool service_management = 5;
+  bool file_operations = 6;
+  bool network_recon = 7;
+  bool pivoting = 8;
+}
+
+message EvasionConfig {
+  string obfuscator = 1;
+  bool sgn_encode = 2;
+  bool debug_strip = 3;
+  bool string_obfuscation = 4;
+}
+
+message OutputConfig {
+  OutputFormat format = 1;
+  string name = 2;
+  bool code_sign = 3;
+  bytes signing_cert = 4;
+}
+
+message PayloadArtifact {
+  string id = 1;
+  google.protobuf.Timestamp created_at = 2;
+  string created_by = 3;
+  TargetPlatform target = 4;
+  ImplantMode mode = 5;
+  repeated TransportType transports = 6;
+  OutputFormat format = 7;
+  string sha256 = 8;
+  int64 file_size = 9;
+  string implant_id = 10;
+  string public_key = 11;
+  string engagement_id = 12;
+  string c2_profile_id = 13;
+  google.protobuf.Timestamp expiry = 14;
+  ArtifactStatus status = 15;
+}
+
+enum ArtifactStatus {
+  ARTIFACT_STATUS_UNSPECIFIED = 0;
+  ARTIFACT_STATUS_BUILDING = 1;
+  ARTIFACT_STATUS_ACTIVE = 2;
+  ARTIFACT_STATUS_EXPIRED = 3;
+  ARTIFACT_STATUS_REVOKED = 4;
+}
+
+message PayloadArtifacts {
+  repeated PayloadArtifact artifacts = 1;
+}
+
+message BuildJob {
+  string id = 1;
+  PayloadConfig config = 2;
+  BuildStatus status = 3;
+  int32 progress_pct = 4;
+  string current_stage = 5;
+  string error = 6;
+  google.protobuf.Timestamp started_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+  string artifact_id = 9;
+}
+
+enum BuildStatus {
+  BUILD_STATUS_UNSPECIFIED = 0;
+  BUILD_STATUS_QUEUED = 1;
+  BUILD_STATUS_RUNNING = 2;
+  BUILD_STATUS_COMPLETED = 3;
+  BUILD_STATUS_FAILED = 4;
+  BUILD_STATUS_CANCELLED = 5;
+}
+
+message OperatorConfig {
+  string id = 1;
+  string name = 2;
+  string role = 3;
+  repeated string engagement_ids = 4;
+  repeated Permission permissions = 5;
+  bool mfa_enabled = 6;
+}
+
+message Permission {
+  string resource = 1;
+  repeated string actions = 2;
+}
+
+message Role {
+  string name = 1;
+  string description = 2;
+  repeated Permission permissions = 3;
+}
+
+message Roles {
+  repeated Role roles = 1;
+}

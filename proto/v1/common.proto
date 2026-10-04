@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package privatec2.v1;
+
+option go_package = "github.com/azizbinmohammad/private-c2/pkg/proto/v1/commonpb";
+
+import "google/protobuf/timestamp.proto";
+
+message Empty {}
+
+message Response {
+  bool success = 1;
+  string error = 2;
+}
+
+message Pagination {
+  int32 page = 1;
+  int32 page_size = 2;
+  int32 total = 3;
+}
+
+message TargetPlatform {
+  string os = 1;       // windows, linux, darwin, freebsd, ios, android
+  string arch = 2;     // amd64, arm64, 386, arm, mips, mipsle, etc.
+}
+
+message Operator {
+  string id = 1;
+  string name = 2;
+  string role = 3;
+  google.protobuf.Timestamp last_active = 4;
+  string source_ip = 5;
+}
+
+message SessionHealth {
+  double latency_ms = 1;
+  double jitter_ms = 2;
+  double packet_loss_pct = 3;
+  google.protobuf.Timestamp last_seen = 4;
+  HealthStatus status = 5;
+}
+
+enum HealthStatus {
+  HEALTH_UNKNOWN = 0;
+  HEALTH_HEALTHY = 1;
+  HEALTH_DEGRADED = 2;
+  HEALTH_STALE = 3;
+  HEALTH_LOST = 4;
+}
+
+enum ImplantMode {
+  IMPLANT_MODE_UNSPECIFIED = 0;
+  IMPLANT_MODE_SESSION = 1;
+  IMPLANT_MODE_BEACON = 2;
+}
+
+enum TransportType {
+  TRANSPORT_UNSPECIFIED = 0;
+  TRANSPORT_MTLS = 1;
+  TRANSPORT_HTTPS = 2;
+  TRANSPORT_HTTP = 3;
+  TRANSPORT_DNS = 4;
+  TRANSPORT_WIREGUARD = 5;
+}
+
+enum OutputFormat {
+  OUTPUT_UNSPECIFIED = 0;
+  OUTPUT_EXE = 1;
+  OUTPUT_DLL = 2;
+  OUTPUT_SHARED_LIB = 3;
+  OUTPUT_SHELLCODE = 4;
+  OUTPUT_SERVICE = 5;
+}
+
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_INFORMATIONAL = 1;
+  SEVERITY_LOW = 2;
+  SEVERITY_MEDIUM = 3;
+  SEVERITY_HIGH = 4;
+  SEVERITY_CRITICAL = 5;
+}

@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package privatec2.v1;
+
+option go_package = "github.com/azizbinmohammad/private-c2/pkg/proto/v1/auditpb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+message AuditEntry {
+  string id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string operator_id = 3;
+  string engagement_id = 4;
+  string session_id = 5;
+  AuditEventType event_type = 6;
+  string action = 7;
+  string target = 8;
+  string result_summary = 9;
+  google.protobuf.Struct metadata = 10;
+  string source_ip = 11;
+  string previous_hash = 12;
+  string entry_hash = 13;
+  string correlation_id = 14;
+}
+
+enum AuditEventType {
+  AUDIT_EVENT_UNSPECIFIED = 0;
+  AUDIT_EVENT_OPERATOR_LOGIN = 1;
+  AUDIT_EVENT_OPERATOR_LOGOUT = 2;
+  AUDIT_EVENT_PAYLOAD_GENERATE = 3;
+  AUDIT_EVENT_PAYLOAD_REVOKE = 4;
+  AUDIT_EVENT_SESSION_INTERACT = 5;
+  AUDIT_EVENT_SESSION_KILL = 6;
+  AUDIT_EVENT_LISTENER_START = 7;
+  AUDIT_EVENT_LISTENER_STOP = 8;
+  AUDIT_EVENT_DATA_COLLECT = 9;
+  AUDIT_EVENT_PIVOT = 10;
+  AUDIT_EVENT_PRIVESC_ASSESS = 11;
+  AUDIT_EVENT_CONFIG_CHANGE = 12;
+  AUDIT_EVENT_KILL_SWITCH = 13;
+  AUDIT_EVENT_SCOPE_VIOLATION = 14;
+  AUDIT_EVENT_ENGAGEMENT_CREATE = 15;
+  AUDIT_EVENT_ENGAGEMENT_UPDATE = 16;
+}
+
+message AuditQuery {
+  string engagement_id = 1;
+  string operator_id = 2;
+  string session_id = 3;
+  AuditEventType event_type = 4;
+  google.protobuf.Timestamp start_time = 5;
+  google.protobuf.Timestamp end_time = 6;
+  int32 page = 7;
+  int32 page_size = 8;
+}
+
+message AuditEntries {
+  repeated AuditEntry entries = 1;
+  int32 total = 2;
+}
