@@ -1,0 +1,476 @@
+syntax = "proto3";
+
+package privatec2.v1;
+
+option go_package = "github.com/azizbinmohammad/private-c2/pkg/proto/v1/otpb";
+
+import "google/protobuf/timestamp.proto";
+
+// OTService provides gRPC methods for OT/ICS assessment.
+// This service is NOT registered with gRPC reflection (hidden).
+// ALL operations are READ-ONLY - no writes to OT devices.
+service OTService {
+  // Asset discovery and management
+  rpc DiscoverAssets(OTDiscoverRequest) returns (OTDiscoverResponse);
+  rpc GetAsset(OTAssetRequest) returns (OTAssetResponse);
+  rpc ListAssets(OTListAssetsRequest) returns (OTListAssetsResponse);
+
+  // Protocol-specific queries (read-only)
+  rpc QueryProtocol(OTProtocolQueryRequest) returns (OTProtocolQueryResponse);
+
+  // Vulnerability assessment (offline CVE correlation)
+  rpc ScanVulnerabilities(OTVulnScanRequest) returns (OTVulnScanResponse);
+  rpc ListVulnerabilities(OTListVulnsRequest) returns (OTListVulnsResponse);
+
+  // Default credential testing (single attempt per credential)
+  rpc TestCredentials(OTCredentialTestRequest) returns (OTCredentialTestResponse);
+
+  // Traffic capture (passive only)
+  rpc StartCapture(OTCaptureRequest) returns (OTCaptureResponse);
+
+  // Network topology
+  rpc GetTopology(OTTopologyRequest) returns (OTTopologyResponse);
+
+  // Segmentation analysis
+  rpc AnalyzeSegmentation(OTSegmentationRequest) returns (OTSegmentationResponse);
+
+  // Compliance gap analysis
+  rpc RunCompliance(OTComplianceRequest) returns (OTComplianceResponse);
+
+  // HMI assessment (HTTP GET only)
+  rpc AssessHMI(OTHMIRequest) returns (OTHMIResponse);
+
+  // Wireless detection
+  rpc DetectWireless(OTWirelessRequest) returns (OTWirelessResponse);
+
+  // Historian/SCADA detection
+  rpc DetectHistorians(OTHistorianRequest) returns (OTHistorianResponse);
+
+  // PLC program metadata (read-only)
+  rpc ReadPLCMetadata(OTPLCRequest) returns (OTPLCResponse);
+
+  // Serial/fieldbus enumeration
+  rpc EnumerateSerial(OTSerialRequest) returns (OTSerialResponse);
+
+  // Report generation
+  rpc GenerateReport(OTReportRequest) returns (OTReportResponse);
+
+  // Emergency stop
+  rpc EmergencyStop(OTEmergencyStopRequest) returns (OTEmergencyStopResponse);
+
+  // Statistics
+  rpc GetStats(OTStatsRequest) returns (OTStatsResponse);
+}
+
+// --- Common Types ---
+
+message OTAsset {
+  string id = 1;
+  string ip = 2;
+  string mac = 3;
+  string hostname = 4;
+  string vendor = 5;
+  string model = 6;
+  string firmware = 7;
+  string serial_number = 8;
+  string role = 9;         // PLC, HMI, RTU, DCS, EWS, Historian, Gateway, IO, Sensor
+  int32 purdue_level = 10; // 0-5
+  string protocol = 11;
+  repeated string protocols = 12;
+  bool safety_rated = 13;
+  int32 sil_level = 14;
+  string description = 15;
+  repeated int32 open_ports = 16;
+  repeated string services = 17;
+  map<string, string> banners = 18;
+  string discovery_method = 19;
+  double confidence = 20;
+  repeated string tags = 21;
+  google.protobuf.Timestamp first_seen = 22;
+  google.protobuf.Timestamp last_seen = 23;
+}
+
+message OTVulnerability {
+  string cve_id = 1;
+  string description = 2;
+  double cvss = 3;
+  string severity = 4;
+  string affected_versions = 5;
+  string fixed_version = 6;
+  string vendor_advisory = 7;
+  string icscert_advisory = 8;
+  string attack_vector = 9;
+  repeated string mitigations = 10;
+  repeated string references = 11;
+}
+
+message OTCredentialFinding {
+  string username = 1;
+  bool is_default = 2;
+  string protocol = 3;
+  string service = 4;
+  string severity = 5;
+  string vendor = 6;
+  string description = 7;
+}
+
+message OTSegmentationGap {
+  string description = 1;
+  string from_zone = 2;
+  string to_zone = 3;
+  int32 from_level = 4;
+  int32 to_level = 5;
+  string protocol = 6;
+  string severity = 7;
+}
+
+message OTComplianceFinding {
+  string framework = 1;
+  string requirement = 2;
+  string section = 3;
+  string description = 4;
+  string status = 5;   // pass, fail, partial, not_assessed
+  string severity = 6;
+  string evidence = 7;
+  string remediation = 8;
+}
+
+message OTTopologyNode {
+  string id = 1;
+  string ip = 2;
+  string hostname = 3;
+  string vendor = 4;
+  string model = 5;
+  string device_type = 6;
+  int32 purdue_level = 7;
+  string zone = 8;
+  int32 vlan = 9;
+  repeated string protocols = 10;
+  bool is_dual_homed = 11;
+  bool is_gateway = 12;
+}
+
+message OTTopologyEdge {
+  string source_id = 1;
+  string target_id = 2;
+  string protocol = 3;
+  int32 port = 4;
+  bool encrypted = 5;
+  bool bidirectional = 6;
+}
+
+message OTHMIFinding {
+  string title = 1;
+  string description = 2;
+  string severity = 3;
+  string category = 4;
+  string remediation = 5;
+  string url = 6;
+}
+
+message OTWirelessFinding {
+  string protocol = 1;
+  string evidence = 2;
+  string gateway = 3;
+  string severity = 4;
+  string risk = 5;
+  string remediation = 6;
+}
+
+// --- Request/Response Messages ---
+
+message OTDiscoverRequest {
+  string engagement_id = 1;
+  string session_id = 2;
+  bool passive = 3;
+  bool active = 4;
+  int32 timeout_seconds = 5;
+  repeated string protocols = 6;
+}
+
+message OTDiscoverResponse {
+  repeated OTAsset assets = 1;
+  int32 total = 2;
+  string error = 3;
+}
+
+message OTAssetRequest {
+  string asset_id = 1;
+  string engagement_id = 2;
+}
+
+message OTAssetResponse {
+  OTAsset asset = 1;
+  string error = 2;
+}
+
+message OTListAssetsRequest {
+  string engagement_id = 1;
+  string filter_vendor = 2;
+  string filter_role = 3;
+  int32 filter_purdue_level = 4;
+  int32 page = 5;
+  int32 page_size = 6;
+}
+
+message OTListAssetsResponse {
+  repeated OTAsset assets = 1;
+  int32 total = 2;
+}
+
+message OTProtocolQueryRequest {
+  string engagement_id = 1;
+  string session_id = 2;
+  string target = 3;
+  int32 port = 4;
+  string protocol = 5;
+  string operation = 6; // e.g., "identify", "read_coils", "browse"
+  map<string, string> params = 7;
+}
+
+message OTProtocolQueryResponse {
+  map<string, string> result = 1;
+  string raw_response = 2;
+  string error = 3;
+}
+
+message OTVulnScanRequest {
+  string engagement_id = 1;
+  string target = 2;
+  string vendor = 3;
+  string model = 4;
+  string firmware = 5;
+}
+
+message OTVulnScanResponse {
+  repeated OTVulnerability vulnerabilities = 1;
+  repeated InsecureProtocol insecure_protocols = 2;
+  double risk_score = 3;
+  string summary = 4;
+}
+
+message InsecureProtocol {
+  string protocol = 1;
+  int32 port = 2;
+  string issue = 3;
+  string severity = 4;
+  string remediation = 5;
+}
+
+message OTListVulnsRequest {
+  string engagement_id = 1;
+  string severity_filter = 2;
+}
+
+message OTListVulnsResponse {
+  repeated OTVulnerability vulnerabilities = 1;
+  int32 total = 2;
+}
+
+message OTCredentialTestRequest {
+  string engagement_id = 1;
+  string session_id = 2;
+  string target = 3;
+  string vendor = 4;
+  repeated string services = 5;
+}
+
+message OTCredentialTestResponse {
+  repeated OTCredentialFinding findings = 1;
+  int32 total_tested = 2;
+  string error = 3;
+}
+
+message OTCaptureRequest {
+  string engagement_id = 1;
+  string session_id = 2;
+  int32 duration_seconds = 3;
+  int64 max_bytes = 4;
+  repeated string protocols = 5;
+}
+
+message OTCaptureResponse {
+  int32 total_packets = 1;
+  int64 total_bytes = 2;
+  map<string, int32> protocol_breakdown = 3;
+  string capture_id = 4;
+  string error = 5;
+}
+
+message OTTopologyRequest {
+  string engagement_id = 1;
+  string format = 2; // "json" or "dot"
+}
+
+message OTTopologyResponse {
+  repeated OTTopologyNode nodes = 1;
+  repeated OTTopologyEdge edges = 2;
+  repeated OTSegmentationGap gaps = 3;
+  string dot_output = 4; // GraphViz DOT if format was "dot"
+}
+
+message OTSegmentationRequest {
+  string engagement_id = 1;
+}
+
+message OTSegmentationResponse {
+  repeated OTSegmentationGap gaps = 1;
+  double overall_score = 2;
+  repeated string recommendations = 3;
+}
+
+message OTComplianceRequest {
+  string engagement_id = 1;
+  repeated string frameworks = 2; // iec62443, nist80082, nerccip
+}
+
+message OTComplianceResponse {
+  repeated OTComplianceFinding findings = 1;
+  int32 total_checks = 2;
+  int32 passed = 3;
+  int32 failed = 4;
+  int32 partial = 5;
+  int32 not_assessed = 6;
+  double compliance_rate = 7;
+}
+
+message OTHMIRequest {
+  string engagement_id = 1;
+  string session_id = 2;
+  string target = 3;
+}
+
+message OTHMIResponse {
+  repeated OTHMIFinding findings = 1;
+  string error = 2;
+}
+
+message OTWirelessRequest {
+  string engagement_id = 1;
+}
+
+message OTWirelessResponse {
+  repeated OTWirelessFinding findings = 1;
+  repeated string recommendations = 2;
+}
+
+message OTHistorianRequest {
+  string engagement_id = 1;
+}
+
+message OTHistorianResponse {
+  repeated HistorianInfo historians = 1;
+  repeated string recommendations = 2;
+}
+
+message HistorianInfo {
+  string ip = 1;
+  string type = 2;
+  string version = 3;
+  string vendor = 4;
+  string product = 5;
+  bool web_interface = 6;
+  bool auth_required = 7;
+  bool tls_enabled = 8;
+}
+
+message OTPLCRequest {
+  string engagement_id = 1;
+  string session_id = 2;
+  string target = 3;
+  int32 port = 4;
+  string protocol = 5;
+}
+
+message OTPLCResponse {
+  string vendor = 1;
+  string model = 2;
+  string firmware = 3;
+  repeated PLCBlock blocks = 4;
+  repeated PLCTag tags = 5;
+  string error = 6;
+}
+
+message PLCBlock {
+  int32 number = 1;
+  string type = 2;
+  string name = 3;
+  string language = 4;
+  int32 size = 5;
+}
+
+message PLCTag {
+  string name = 1;
+  string address = 2;
+  string data_type = 3;
+  string comment = 4;
+  string scope = 5;
+  bool read_only = 6;
+}
+
+message OTSerialRequest {
+  string engagement_id = 1;
+}
+
+message OTSerialResponse {
+  repeated SerialPort serial_ports = 1;
+  repeated FieldbusInfo fieldbuses = 2;
+  repeated string recommendations = 3;
+}
+
+message SerialPort {
+  string ip = 1;
+  int32 port = 2;
+  string type = 3;
+  string vendor = 4;
+  string model = 5;
+  string banner = 6;
+}
+
+message FieldbusInfo {
+  string type = 1;
+  string gateway = 2;
+  string protocol = 3;
+  string evidence = 4;
+}
+
+message OTReportRequest {
+  string engagement_id = 1;
+  string format = 2; // json, markdown, csv, mitre_attack_navigator
+  string title = 3;
+}
+
+message OTReportResponse {
+  string report_id = 1;
+  string format = 2;
+  bytes report_data = 3;
+  string executive_summary = 4;
+  string error = 5;
+}
+
+message OTEmergencyStopRequest {
+  string engagement_id = 1;
+  string reason = 2;
+  bool confirm = 3;
+}
+
+message OTEmergencyStopResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message OTStatsRequest {
+  string engagement_id = 1;
+}
+
+message OTStatsResponse {
+  int32 asset_count = 1;
+  int32 vuln_count = 2;
+  int32 critical_vulns = 3;
+  int32 high_vulns = 4;
+  double compliance_rate = 5;
+  double segmentation_score = 6;
+  int32 credential_findings = 7;
+  int32 hmi_findings = 8;
+  int32 wireless_findings = 9;
+}
