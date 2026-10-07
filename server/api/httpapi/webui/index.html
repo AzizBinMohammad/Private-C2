@@ -21,6 +21,7 @@ body{height:100vh;overflow:hidden}
 #login-screen{display:flex;align-items:center;justify-content:center;height:100vh;background:radial-gradient(ellipse at 50% 0%,#131b2e 0%,var(--bg) 70%)}
 .login-box{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:40px;width:360px;box-shadow:0 25px 60px rgba(0,0,0,.5)}
 .login-box h1{font-size:24px;font-weight:700;margin-bottom:4px;letter-spacing:-.5px}
+.login-box h1 span{color:var(--accent)}
 .login-box .sub{color:var(--fg3);font-size:12px;margin-bottom:28px}
 .login-box label{display:block;font-size:12px;color:var(--fg2);margin-bottom:4px;font-weight:500}
 .login-box input{width:100%;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--fg);font-size:14px;margin-bottom:16px;outline:none;transition:border .2s}
@@ -32,17 +33,24 @@ body{height:100vh;overflow:hidden}
 /* ── MAIN LAYOUT ── */
 #app{display:none;height:100vh;flex-direction:column}
 header{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:48px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
-header .brand{font-weight:700;font-size:16px;letter-spacing:-.5px;display:flex;align-items:center;gap:8px}
+header .brand{font-weight:700;font-size:16px;letter-spacing:-.5px;display:flex;align-items:center;gap:8px;cursor:default;user-select:none}
 header .brand span{color:var(--accent)}
 header .right{display:flex;align-items:center;gap:12px}
+.server-status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2)}
+.server-status .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green)}
+.server-status.offline .dot{background:var(--red);box-shadow:0 0 6px var(--red)}
+.engagement-indicator{font-size:11px;color:var(--green);background:rgba(34,197,94,.1);padding:3px 10px;border-radius:12px;border:1px solid rgba(34,197,94,.2)}
 header .user-badge{font-size:12px;color:var(--fg2);background:var(--bg3);padding:4px 10px;border-radius:20px}
-header button{background:transparent;border:1px solid var(--border);color:var(--fg2);padding:4px 12px;border-radius:var(--radius);cursor:pointer;font-size:12px}
-header button:hover{border-color:var(--fg3);color:var(--fg)}
+header button.logout-btn{background:transparent;border:1px solid var(--border);color:var(--fg2);padding:4px 12px;border-radius:var(--radius);cursor:pointer;font-size:12px}
+header button.logout-btn:hover{border-color:var(--fg3);color:var(--fg)}
 
-.tabs{display:flex;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;gap:0;flex-shrink:0}
-.tab{padding:10px 20px;font-size:13px;color:var(--fg3);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;font-weight:500}
+/* ── TABS ── */
+.tabs{display:flex;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;gap:0;flex-shrink:0;overflow-x:auto}
+.tab{padding:10px 18px;font-size:13px;color:var(--fg3);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;font-weight:500;white-space:nowrap}
 .tab:hover{color:var(--fg2)}
 .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab.ot-tab-btn{color:var(--purple)}
+.tab.ot-tab-btn.active{color:var(--purple);border-bottom-color:var(--purple)}
 
 .main{flex:1;overflow:hidden;display:flex}
 
@@ -50,28 +58,24 @@ header button:hover{border-color:var(--fg3);color:var(--fg)}
 .panel{display:none;flex:1;overflow:hidden}
 .panel.active{display:flex}
 
-/* ── DASHBOARD ── */
-#panel-dashboard{flex-direction:column;padding:20px;gap:16px;overflow-y:auto}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
-.stat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
-.stat .label{font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-.stat .value{font-size:28px;font-weight:700}
-.stat .value.green{color:var(--green)}
-.stat .value.yellow{color:var(--yellow)}
-.stat .value.red{color:var(--red)}
+/* ── COMMON COMPONENTS ── */
+.toolbar{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--border);flex-shrink:0;gap:12px;flex-wrap:wrap}
+.toolbar input[type="text"],.toolbar select{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--fg);font-size:13px;outline:none}
+.toolbar input[type="text"]:focus,.toolbar select:focus{border-color:var(--accent)}
+.toolbar .actions{display:flex;gap:8px;flex-wrap:wrap}
+.toolbar .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
-/* ── SESSIONS TABLE ── */
-#panel-sessions{flex-direction:column;overflow:hidden}
-.toolbar{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
-.toolbar input{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:6px 12px;color:var(--fg);width:260px;font-size:13px;outline:none}
-.toolbar input:focus{border-color:var(--accent)}
-.toolbar .actions{display:flex;gap:8px}
-.btn{padding:6px 14px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg3);color:var(--fg);font-size:12px;cursor:pointer;font-weight:500;transition:all .15s}
+.btn{padding:6px 14px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg3);color:var(--fg);font-size:12px;cursor:pointer;font-weight:500;transition:all .15s;white-space:nowrap}
 .btn:hover{border-color:var(--fg3)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.primary:hover{background:var(--accent2)}
 .btn.danger{border-color:var(--red);color:var(--red)}
 .btn.danger:hover{background:var(--red);color:#fff}
+.btn.success{border-color:var(--green);color:var(--green)}
+.btn.success:hover{background:var(--green);color:#fff}
+.btn.purple{border-color:var(--purple);color:var(--purple)}
+.btn.purple:hover{background:var(--purple);color:#fff}
 
 .table-wrap{flex:1;overflow:auto;padding:0 20px 20px}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -84,15 +88,45 @@ tr.selected td{background:rgba(59,130,246,.1)}
 .status-dot.active{background:var(--green);box-shadow:0 0 6px var(--green)}
 .status-dot.stale{background:var(--yellow);box-shadow:0 0 6px var(--yellow)}
 .status-dot.lost{background:var(--red);box-shadow:0 0 6px var(--red)}
-.os-badge{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg4);color:var(--fg2)}
 .mono{font-family:'SF Mono',Consolas,monospace;font-size:12px;color:var(--fg2)}
+.os-badge{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg4);color:var(--fg2)}
+
+/* badges */
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px}
+.badge-green{background:rgba(34,197,94,.15);color:var(--green)}
+.badge-blue{background:rgba(59,130,246,.15);color:var(--accent)}
+.badge-red{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-yellow{background:rgba(234,179,8,.15);color:var(--yellow)}
+.badge-orange{background:rgba(249,115,22,.15);color:var(--orange)}
+.badge-purple{background:rgba(168,85,247,.15);color:var(--purple)}
+.badge-gray{background:rgba(100,116,139,.15);color:var(--fg3)}
+
+/* ── DASHBOARD ── */
+#panel-dashboard{flex-direction:column;padding:20px;gap:16px;overflow-y:auto}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.stat .label{font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.stat .value{font-size:28px;font-weight:700}
+.stat .value.green{color:var(--green)}
+.stat .value.blue{color:var(--accent)}
+.stat .value.yellow{color:var(--yellow)}
+.stat .value.purple{color:var(--purple)}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;flex:1;min-height:0}
+.dash-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;overflow-y:auto;display:flex;flex-direction:column}
+.dash-card h3{font-size:14px;margin-bottom:12px;color:var(--fg2)}
+.dash-card table{font-size:12px}
+
+/* ── SESSIONS TABLE ── */
+#panel-sessions{flex-direction:column;overflow:hidden}
 
 /* ── INTERACT PANEL ── */
 #panel-interact{flex-direction:column;overflow:hidden}
 .interact-header{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-shrink:0}
-.interact-header .meta{display:flex;gap:20px;font-size:12px;color:var(--fg2)}
+.interact-header .back-btn{background:var(--bg3);border:1px solid var(--border);color:var(--fg2);padding:4px 10px;border-radius:var(--radius);cursor:pointer;font-size:12px}
+.interact-header .back-btn:hover{border-color:var(--fg3);color:var(--fg)}
+.interact-header .meta{display:flex;gap:20px;font-size:12px;color:var(--fg2);flex-wrap:wrap}
 .interact-header .meta b{color:var(--fg);font-weight:600}
-.terminal{flex:1;background:#000;font-family:'SF Mono',Consolas,monospace;font-size:13px;padding:16px;overflow-y:auto;line-height:1.6}
+.terminal{flex:1;background:#05080f;font-family:'SF Mono',Consolas,monospace;font-size:13px;padding:16px;overflow-y:auto;line-height:1.6}
 .terminal .prompt{color:var(--accent)}
 .terminal .output{color:var(--green);white-space:pre-wrap;word-break:break-all}
 .terminal .error{color:var(--red);white-space:pre-wrap}
@@ -102,10 +136,31 @@ tr.selected td{background:rgba(59,130,246,.1)}
 .cmd-bar input{flex:1;background:var(--bg2);border:none;color:var(--fg);padding:10px 14px;font-size:13px;font-family:'SF Mono',Consolas,monospace;outline:none}
 .cmd-bar button{background:var(--accent);border:none;color:#fff;padding:10px 20px;font-size:13px;cursor:pointer;font-weight:600}
 
-/* ── OT PANEL (hidden) ── */
+/* ── BEACONS ── */
+#panel-beacons{flex-direction:column;overflow:hidden}
+
+/* ── LISTENERS ── */
+#panel-listeners{flex-direction:column;overflow:hidden}
+.section-title{font-size:13px;font-weight:600;color:var(--fg2);padding:16px 20px 8px;text-transform:uppercase;letter-spacing:.5px}
+
+/* ── ENGAGEMENTS ── */
+#panel-engagements{flex-direction:column;overflow:hidden}
+
+/* ── PAYLOADS ── */
+#panel-payloads{flex-direction:column;overflow:hidden}
+
+/* ── OPERATORS ── */
+#panel-operators{flex-direction:column;overflow:hidden}
+
+/* ── AUDIT ── */
+#panel-audit{flex-direction:column;overflow:hidden}
+.pagination{display:flex;align-items:center;gap:12px;justify-content:center;padding:12px;border-top:1px solid var(--border);flex-shrink:0}
+.pagination span{font-size:13px;color:var(--fg2)}
+
+/* ── OT PANEL ── */
 #panel-ot{flex-direction:column;overflow:hidden}
 .ot-banner{background:linear-gradient(135deg,#1a0a2e,#0a1628);padding:20px;border-bottom:1px solid var(--purple);display:flex;align-items:center;gap:12px;flex-shrink:0}
-.ot-banner .shield{font-size:24px}
+.ot-banner .shield{font-size:28px;line-height:1}
 .ot-banner h2{color:var(--purple);font-size:16px}
 .ot-banner p{color:var(--fg3);font-size:12px}
 .ot-content{flex:1;overflow-y:auto;padding:20px}
@@ -114,12 +169,6 @@ tr.selected td{background:rgba(59,130,246,.1)}
 .ot-card h3{font-size:14px;margin-bottom:8px;color:var(--purple)}
 .ot-card .detail{font-size:12px;color:var(--fg2);margin-bottom:4px}
 .ot-card .detail b{color:var(--fg)}
-.ot-card .severity{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;text-transform:uppercase}
-.sev-critical{background:rgba(239,68,68,.15);color:var(--red)}
-.sev-high{background:rgba(249,115,22,.15);color:var(--orange)}
-.sev-medium{background:rgba(234,179,8,.15);color:var(--yellow)}
-.sev-low{background:rgba(34,197,94,.15);color:var(--green)}
-
 .ot-tabs{display:flex;padding:0 20px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
 .ot-tab{padding:8px 16px;font-size:12px;color:var(--fg3);cursor:pointer;border-bottom:2px solid transparent;font-weight:500}
 .ot-tab:hover{color:var(--fg2)}
@@ -129,9 +178,37 @@ tr.selected td{background:rgba(59,130,246,.1)}
 .empty-state{text-align:center;padding:60px 20px;color:var(--fg3)}
 .empty-state .big{font-size:40px;margin-bottom:12px}
 
+/* ── MODAL ── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:400px;max-width:520px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.5)}
+.modal h2{font-size:16px;margin-bottom:16px;font-weight:700}
+.modal .form-group{margin-bottom:14px}
+.modal .form-group label{display:block;font-size:12px;color:var(--fg2);margin-bottom:4px;font-weight:500}
+.modal .form-group input,.modal .form-group select,.modal .form-group textarea{width:100%;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--fg);font-size:13px;outline:none;font-family:inherit}
+.modal .form-group input:focus,.modal .form-group select:focus,.modal .form-group textarea:focus{border-color:var(--accent)}
+.modal .form-group textarea{resize:vertical;min-height:60px}
+.modal .form-group .checkbox-row{display:flex;gap:12px;flex-wrap:wrap}
+.modal .form-group .checkbox-row label{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;color:var(--fg)}
+.modal .form-group .checkbox-row input[type="checkbox"]{width:auto;margin:0}
+.modal .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+.modal p.confirm-text{font-size:14px;color:var(--fg2);margin-bottom:16px;line-height:1.5}
+.modal p.confirm-text b{color:var(--fg)}
+
+/* ── TOAST ── */
+#toast-container{position:fixed;top:60px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:toast-in .3s ease;max-width:400px}
+.toast.error{border-color:var(--red);color:var(--red)}
+.toast.success{border-color:var(--green);color:var(--green)}
+.toast.info{border-color:var(--accent);color:var(--accent)}
+@keyframes toast-in{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+
 /* ── RESPONSIVE ── */
+@media(max-width:1100px){.dash-grid{grid-template-columns:1fr}}
 @media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:600px){.stats{grid-template-columns:1fr}}
+@media(max-width:600px){.stats{grid-template-columns:1fr}.toolbar{flex-direction:column;align-items:stretch}.toolbar .actions{justify-content:flex-end}}
+
+.loading-row td{text-align:center;color:var(--fg3);padding:40px}
 </style>
 </head>
 <body>
@@ -139,7 +216,7 @@ tr.selected td{background:rgba(59,130,246,.1)}
 <!-- LOGIN -->
 <div id="login-screen">
   <div class="login-box">
-    <h1>PC2</h1>
+    <h1><span>PC2</span></h1>
     <div class="sub">Private Command &amp; Control — Operator Portal</div>
     <div class="login-err" id="login-err"></div>
     <label>Operator Name</label>
@@ -150,52 +227,83 @@ tr.selected td{background:rgba(59,130,246,.1)}
   </div>
 </div>
 
+<!-- TOAST -->
+<div id="toast-container"></div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal-content"></div>
+</div>
+
 <!-- APP -->
 <div id="app">
   <header>
-    <div class="brand"><span>PC2</span> Command Portal</div>
+    <div class="brand" id="brand-trigger"><span>PC2</span> Command Portal</div>
     <div class="right">
+      <span class="engagement-indicator" id="active-engagement" style="display:none"></span>
+      <div class="server-status" id="server-status-badge">
+        <span class="dot"></span>
+        <span class="status-text">Connecting...</span>
+      </div>
       <span class="user-badge" id="user-badge"></span>
-      <button onclick="doLogout()">Logout</button>
+      <button class="logout-btn" onclick="doLogout()">Logout</button>
     </div>
   </header>
+
   <div class="tabs" id="main-tabs">
     <div class="tab active" data-panel="dashboard">Dashboard</div>
     <div class="tab" data-panel="sessions">Sessions</div>
-    <div class="tab" data-panel="interact">Interact</div>
+    <div class="tab" data-panel="beacons">Beacons</div>
+    <div class="tab" data-panel="listeners">Listeners</div>
+    <div class="tab" data-panel="engagements">Engagements</div>
+    <div class="tab" data-panel="payloads">Payloads</div>
+    <div class="tab" data-panel="operators">Operators</div>
+    <div class="tab" data-panel="audit">Audit</div>
   </div>
+
   <div class="main">
 
     <!-- DASHBOARD -->
     <div class="panel active" id="panel-dashboard">
-      <div class="stats">
-        <div class="stat"><div class="label">Active Sessions</div><div class="value green" id="s-active">0</div></div>
-        <div class="stat"><div class="label">Stale</div><div class="value yellow" id="s-stale">0</div></div>
-        <div class="stat"><div class="label">Total Seen</div><div class="value" id="s-total">0</div></div>
-        <div class="stat"><div class="label">Pending Tasks</div><div class="value" id="s-tasks">—</div></div>
+      <div class="stats" id="dash-stats">
+        <div class="stat"><div class="label">Active Sessions</div><div class="value green" id="d-sessions">-</div></div>
+        <div class="stat"><div class="label">Beacons</div><div class="value yellow" id="d-beacons">-</div></div>
+        <div class="stat"><div class="label">Listeners</div><div class="value blue" id="d-listeners">-</div></div>
+        <div class="stat"><div class="label">Engagements</div><div class="value purple" id="d-engagements">-</div></div>
       </div>
-      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;flex:1;overflow-y:auto">
-        <h3 style="font-size:14px;margin-bottom:12px;color:var(--fg2)">Recent Sessions</h3>
-        <table>
-          <thead><tr><th>Status</th><th>Hostname</th><th>User</th><th>OS</th><th>IP</th><th>Last Checkin</th></tr></thead>
-          <tbody id="dash-table"></tbody>
-        </table>
+      <div class="dash-grid">
+        <div class="dash-card">
+          <h3>Server Status</h3>
+          <div id="server-info" style="font-size:12px;color:var(--fg2);display:grid;grid-template-columns:auto 1fr;gap:4px 16px">
+            <span>Loading server status...</span>
+          </div>
+        </div>
+        <div class="dash-card">
+          <h3>Recent Sessions</h3>
+          <table>
+            <thead><tr><th>Status</th><th>Hostname</th><th>User</th><th>OS</th><th>IP</th><th>Checkin</th></tr></thead>
+            <tbody id="dash-table"><tr><td colspan="6" class="loading-row" style="text-align:center;color:var(--fg3);padding:20px">Loading...</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <!-- SESSIONS -->
     <div class="panel" id="panel-sessions">
       <div class="toolbar">
-        <input type="text" id="search-input" placeholder="Search sessions..." oninput="renderSessions()">
+        <input type="text" id="search-sessions" placeholder="Search sessions..." style="width:260px" oninput="renderSessions()">
         <div class="actions">
           <button class="btn" onclick="refreshSessions()">Refresh</button>
           <button class="btn primary" onclick="interactSelected()">Interact</button>
+          <button class="btn" onclick="lockSelected()">Lock</button>
+          <button class="btn" onclick="unlockSelected()">Unlock</button>
+          <button class="btn danger" onclick="killSelected()">Kill</button>
         </div>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th></th><th>Status</th><th>ID</th><th>Hostname</th><th>User</th><th>OS / Arch</th><th>PID</th><th>Process</th><th>Transport</th><th>Remote IP</th><th>Last Checkin</th></tr></thead>
-          <tbody id="sess-table"></tbody>
+          <thead><tr><th style="width:30px"></th><th>Status</th><th>ID</th><th>Hostname</th><th>User</th><th>OS / Arch</th><th>PID</th><th>Process</th><th>Transport</th><th>Remote IP</th><th>Last Checkin</th></tr></thead>
+          <tbody id="sess-table"><tr><td colspan="11" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -203,6 +311,7 @@ tr.selected td{background:rgba(59,130,246,.1)}
     <!-- INTERACT -->
     <div class="panel" id="panel-interact">
       <div class="interact-header">
+        <button class="back-btn" onclick="backToSessions()">&#8592; Sessions</button>
         <span style="font-weight:700;font-size:14px" id="int-title">No session selected</span>
         <div class="meta" id="int-meta"></div>
       </div>
@@ -216,12 +325,147 @@ tr.selected td{background:rgba(59,130,246,.1)}
           <option value="download">download</option>
           <option value="ls">ls</option>
           <option value="ps">ps</option>
-          <option value="ifconfig">ifconfig</option>
-          <option value="screenshot">screenshot</option>
           <option value="kill">kill</option>
+          <option value="ifconfig">ifconfig</option>
+          <option value="netstat">netstat</option>
+          <option value="screenshot">screenshot</option>
+          <option value="portscan">portscan</option>
+          <option value="cat">cat</option>
+          <option value="mkdir">mkdir</option>
+          <option value="rm">rm</option>
+          <option value="cp">cp</option>
+          <option value="mv">mv</option>
+          <option value="pwd">pwd</option>
+          <option value="cd">cd</option>
+          <option value="resolve">resolve</option>
         </select>
         <input type="text" id="cmd-args" placeholder="command arguments..." onkeydown="if(event.key==='Enter')sendTask()">
         <button onclick="sendTask()">Execute</button>
+      </div>
+    </div>
+
+    <!-- BEACONS -->
+    <div class="panel" id="panel-beacons">
+      <div class="toolbar">
+        <input type="text" id="search-beacons" placeholder="Search beacons..." style="width:260px" oninput="renderBeacons()">
+        <div class="actions">
+          <button class="btn" onclick="refreshBeacons()">Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Status</th><th>ID</th><th>Hostname</th><th>User</th><th>OS / Arch</th><th>Transport</th><th>Interval</th><th>Jitter</th><th>Last Checkin</th><th>Next Checkin</th></tr></thead>
+          <tbody id="beacons-table"><tr><td colspan="10" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- LISTENERS -->
+    <div class="panel" id="panel-listeners">
+      <div class="toolbar">
+        <span style="font-weight:600;font-size:14px">Listeners</span>
+        <div class="actions">
+          <button class="btn" onclick="refreshListeners()">Refresh</button>
+          <button class="btn primary" onclick="showNewListenerModal()">New Listener</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Type</th><th>Bind Address</th><th>Port</th><th>Engagement</th><th>Status</th><th>Connections</th><th>Actions</th></tr></thead>
+          <tbody id="listeners-table"><tr><td colspan="8" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
+        </table>
+        <div class="section-title" style="margin-top:20px">C2 Profiles</div>
+        <table>
+          <thead><tr><th>ID</th><th>Name</th><th>Description</th><th>Version</th></tr></thead>
+          <tbody id="profiles-table"><tr><td colspan="4" style="text-align:center;color:var(--fg3);padding:20px">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ENGAGEMENTS -->
+    <div class="panel" id="panel-engagements">
+      <div class="toolbar">
+        <span style="font-weight:600;font-size:14px">Engagements</span>
+        <div class="actions">
+          <button class="btn" onclick="refreshEngagements()">Refresh</button>
+          <button class="btn primary" onclick="showNewEngagementModal()">New Engagement</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Name</th><th>Description</th><th>Status</th><th>Auth Ref</th><th>Time Window</th><th>Created By</th><th>Actions</th></tr></thead>
+          <tbody id="engagements-table"><tr><td colspan="8" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PAYLOADS -->
+    <div class="panel" id="panel-payloads">
+      <div class="toolbar">
+        <span style="font-weight:600;font-size:14px">Payloads</span>
+        <div class="actions">
+          <button class="btn" onclick="refreshPayloads()">Refresh</button>
+          <button class="btn primary" onclick="showGeneratePayloadModal()">Generate Payload</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>OS</th><th>Arch</th><th>Mode</th><th>Format</th><th>SHA256</th><th>Size</th><th>Engagement</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody id="payloads-table"><tr><td colspan="11" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- OPERATORS -->
+    <div class="panel" id="panel-operators">
+      <div class="toolbar">
+        <span style="font-weight:600;font-size:14px">Operators</span>
+        <div class="actions">
+          <button class="btn" onclick="refreshOperators()">Refresh</button>
+          <button class="btn primary" onclick="showAddOperatorModal()">Add Operator</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>MFA</th><th>Last Active</th><th>Source IP</th><th>Actions</th></tr></thead>
+          <tbody id="operators-table"><tr><td colspan="7" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- AUDIT -->
+    <div class="panel" id="panel-audit">
+      <div class="toolbar">
+        <div class="filters">
+          <input type="text" id="audit-operator" placeholder="Operator ID..." style="width:160px">
+          <select id="audit-event-type" style="width:160px">
+            <option value="">All Events</option>
+            <option value="auth">Auth</option>
+            <option value="session">Session</option>
+            <option value="task">Task</option>
+            <option value="listener">Listener</option>
+            <option value="engagement">Engagement</option>
+            <option value="payload">Payload</option>
+            <option value="operator">Operator</option>
+            <option value="ot">OT</option>
+          </select>
+          <button class="btn" onclick="refreshAudit()">Filter</button>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="verifyAuditChain()">Verify Chain</button>
+          <button class="btn" onclick="exportAudit()">Export</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Timestamp</th><th>Operator</th><th>Engagement</th><th>Session</th><th>Event</th><th>Action</th><th>Target</th><th>Result</th><th>Source IP</th></tr></thead>
+          <tbody id="audit-table"><tr><td colspan="9" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="audit-pagination">
+        <button class="btn" id="audit-prev" onclick="auditPrev()" disabled>Prev</button>
+        <span id="audit-page-info">Page 1</span>
+        <button class="btn" id="audit-next" onclick="auditNext()">Next</button>
       </div>
     </div>
 
@@ -240,13 +484,15 @@ tr.selected td{background:rgba(59,130,246,.1)}
         <div class="ot-tab" data-ot="creds">Credentials</div>
         <div class="ot-tab" data-ot="topology">Topology</div>
         <div class="ot-tab" data-ot="compliance">Compliance</div>
+        <div class="ot-tab" data-ot="reports">Reports</div>
       </div>
       <div class="ot-content">
-        <div class="ot-sub active" id="ot-assets"><div class="ot-grid" id="ot-assets-grid"></div><div class="empty-state" id="ot-assets-empty"><div class="big">&#9881;</div>No OT assets discovered yet.<br>Run OT reconnaissance tasks from an active session.</div></div>
+        <div class="ot-sub active" id="ot-assets"><div class="ot-grid" id="ot-assets-grid"></div><div class="empty-state" id="ot-assets-empty"><div class="big">&#9881;</div>No OT assets discovered yet.</div></div>
         <div class="ot-sub" id="ot-vulns"><div class="ot-grid" id="ot-vulns-grid"></div><div class="empty-state" id="ot-vulns-empty"><div class="big">&#128737;</div>No vulnerability findings.</div></div>
         <div class="ot-sub" id="ot-creds"><div class="ot-grid" id="ot-creds-grid"></div><div class="empty-state" id="ot-creds-empty"><div class="big">&#128273;</div>No credential findings.</div></div>
-        <div class="ot-sub" id="ot-topology"><div class="empty-state" id="ot-topo-empty"><div class="big">&#128268;</div>No topology data.</div><div id="ot-topo-grid" class="ot-grid"></div></div>
+        <div class="ot-sub" id="ot-topology"><div class="ot-grid" id="ot-topo-grid"></div><div class="empty-state" id="ot-topo-empty"><div class="big">&#128268;</div>No topology data.</div></div>
         <div class="ot-sub" id="ot-compliance"><div class="ot-grid" id="ot-compliance-grid"></div><div class="empty-state" id="ot-compliance-empty"><div class="big">&#128203;</div>No compliance findings.</div></div>
+        <div class="ot-sub" id="ot-reports"><div class="ot-grid" id="ot-reports-grid"></div><div class="empty-state" id="ot-reports-empty"><div class="big">&#128196;</div>No reports generated.</div></div>
       </div>
     </div>
 
@@ -254,41 +500,106 @@ tr.selected td{background:rgba(59,130,246,.1)}
 </div>
 
 <script>
+/* ═══════════════════════════════════════════════════════════════
+   PC2 Command Portal — Client Logic
+   ═══════════════════════════════════════════════════════════════ */
+
 const API = window.location.origin;
 let token = '';
-let sessions = [];
-let selectedSession = null;
-let otVisible = false;
+let currentUser = '';
 
-// ── AUTH ──
+// Data stores
+let sessions = [];
+let beacons = [];
+let listeners = [];
+let profiles = [];
+let engagements = [];
+let payloads = [];
+let operators = [];
+let auditEntries = [];
+let serverInfo = null;
+
+// State
+let selectedSession = null;
+let activeEngagementId = null;
+let otVisible = false;
+let auditPage = 1;
+const AUDIT_LIMIT = 50;
+
+// Refresh intervals
+let sessionInterval, dashboardInterval;
+
+// ══════════════════════════════════════════
+// XSS-safe text escaping
+// ══════════════════════════════════════════
+const escDiv = document.createElement('div');
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  escDiv.textContent = String(s);
+  return escDiv.innerHTML;
+}
+
+// ══════════════════════════════════════════
+// Toast notifications
+// ══════════════════════════════════════════
+function toast(msg, type) {
+  type = type || 'info';
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(function() { el.remove(); }, 4000);
+}
+
+// ══════════════════════════════════════════
+// Modal system
+// ══════════════════════════════════════════
+function openModal(html) {
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+function confirmModal(title, message, onConfirm) {
+  openModal(
+    '<h2>' + esc(title) + '</h2>' +
+    '<p class="confirm-text">' + message + '</p>' +
+    '<div class="modal-actions">' +
+      '<button class="btn" onclick="closeModal()">Cancel</button>' +
+      '<button class="btn danger" id="confirm-action-btn">Confirm</button>' +
+    '</div>'
+  );
+  document.getElementById('confirm-action-btn').onclick = function() {
+    closeModal();
+    onConfirm();
+  };
+}
+
+// ══════════════════════════════════════════
+// Auth
+// ══════════════════════════════════════════
 function doLogin() {
-  const user = document.getElementById('login-user').value.trim();
-  const pass = document.getElementById('login-pass').value;
+  var user = document.getElementById('login-user').value.trim();
+  var pass = document.getElementById('login-pass').value;
   if (!user || !pass) { showLoginErr('Enter operator name and password'); return; }
   fetch(API + '/api/auth/login', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({username: user, password: pass})
-  }).then(r => r.json()).then(d => {
+  }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.error) { showLoginErr(d.error); return; }
     token = d.token;
     sessionStorage.setItem('pc2_token', token);
     sessionStorage.setItem('pc2_user', user);
     enterApp(user);
-  }).catch(() => showLoginErr('Connection failed'));
+  }).catch(function() { showLoginErr('Connection failed'); });
 }
 
 function showLoginErr(msg) {
-  const el = document.getElementById('login-err');
+  var el = document.getElementById('login-err');
   el.textContent = msg; el.style.display = 'block';
-}
-
-function enterApp(user) {
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
-  document.getElementById('user-badge').textContent = user;
-  refreshSessions();
-  setInterval(refreshSessions, 5000);
 }
 
 function doLogout() {
@@ -297,215 +608,473 @@ function doLogout() {
   location.reload();
 }
 
-// auto-login from session
+document.getElementById('login-pass').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doLogin();
+});
+
+function enterApp(user) {
+  currentUser = user;
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('user-badge').textContent = user;
+  loadDashboard();
+  refreshSessions();
+  sessionInterval = setInterval(refreshSessions, 5000);
+  dashboardInterval = setInterval(loadDashboard, 10000);
+}
+
+// Auto-login
 (function() {
-  const t = sessionStorage.getItem('pc2_token');
-  const u = sessionStorage.getItem('pc2_user');
+  var t = sessionStorage.getItem('pc2_token');
+  var u = sessionStorage.getItem('pc2_user');
   if (t && u) { token = t; enterApp(u); }
 })();
 
-// ── TABS ──
-document.getElementById('main-tabs').addEventListener('click', e => {
-  const tab = e.target.closest('.tab');
-  if (!tab) return;
-  document.querySelectorAll('#main-tabs .tab').forEach(t => t.classList.remove('active'));
-  tab.classList.add('active');
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
-});
-
-document.querySelector('.ot-tabs').addEventListener('click', e => {
-  const tab = e.target.closest('.ot-tab');
-  if (!tab) return;
-  document.querySelectorAll('.ot-tab').forEach(t => t.classList.remove('active'));
-  tab.classList.add('active');
-  document.querySelectorAll('.ot-sub').forEach(p => p.classList.remove('active'));
-  document.getElementById('ot-' + tab.dataset.ot).classList.add('active');
-});
-
-// ── HIDDEN OT TAB TRIGGER ──
-// Triple-click the brand text to reveal OT tab
-let brandClicks = 0, brandTimer;
-document.querySelector('header .brand').addEventListener('click', () => {
-  brandClicks++;
-  clearTimeout(brandTimer);
-  brandTimer = setTimeout(() => brandClicks = 0, 600);
-  if (brandClicks >= 3) {
-    brandClicks = 0;
-    toggleOT();
-  }
-});
-
-// Also Ctrl+Shift+O
-document.addEventListener('keydown', e => {
-  if (e.ctrlKey && e.shiftKey && e.key === 'O') {
-    e.preventDefault();
-    toggleOT();
-  }
-});
-
-function toggleOT() {
-  otVisible = !otVisible;
-  let otTab = document.getElementById('ot-tab-btn');
-  if (otVisible) {
-    if (!otTab) {
-      otTab = document.createElement('div');
-      otTab.className = 'tab';
-      otTab.id = 'ot-tab-btn';
-      otTab.dataset.panel = 'ot';
-      otTab.textContent = 'OT/ICS';
-      otTab.style.color = 'var(--purple)';
-      document.getElementById('main-tabs').appendChild(otTab);
-    } else {
-      otTab.style.display = '';
-    }
-    loadOTData();
-  } else if (otTab) {
-    otTab.style.display = 'none';
-    // if we're on OT panel, switch away
-    if (document.getElementById('panel-ot').classList.contains('active')) {
-      document.querySelector('[data-panel="dashboard"]').click();
-    }
-  }
-}
-
-// ── API HELPERS ──
-function apiFetch(path, opts = {}) {
+// ══════════════════════════════════════════
+// API helper
+// ══════════════════════════════════════════
+function apiFetch(path, opts) {
+  opts = opts || {};
   opts.headers = opts.headers || {};
   opts.headers['Authorization'] = 'Bearer ' + token;
   if (opts.body && typeof opts.body === 'object') {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(opts.body);
   }
-  return fetch(API + path, opts).then(r => r.json());
+  return fetch(API + path, opts).then(function(r) {
+    if (r.status === 401) { doLogout(); throw new Error('Unauthorized'); }
+    return r.json();
+  });
 }
 
-// ── SESSIONS ──
+// ══════════════════════════════════════════
+// Tab navigation
+// ══════════════════════════════════════════
+document.getElementById('main-tabs').addEventListener('click', function(e) {
+  var tab = e.target.closest('.tab');
+  if (!tab) return;
+  switchTab(tab.dataset.panel);
+});
+
+function switchTab(panel) {
+  document.querySelectorAll('#main-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+  var tabEl = document.querySelector('#main-tabs .tab[data-panel="' + panel + '"]');
+  if (tabEl) tabEl.classList.add('active');
+  document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+  document.getElementById('panel-' + panel).classList.add('active');
+
+  // Load data for tab on switch
+  if (panel === 'beacons') refreshBeacons();
+  else if (panel === 'listeners') refreshListeners();
+  else if (panel === 'engagements') refreshEngagements();
+  else if (panel === 'payloads') refreshPayloads();
+  else if (panel === 'operators') refreshOperators();
+  else if (panel === 'audit') refreshAudit();
+  else if (panel === 'ot') loadOTData();
+}
+
+// OT tab sub-tabs
+document.querySelector('.ot-tabs').addEventListener('click', function(e) {
+  var tab = e.target.closest('.ot-tab');
+  if (!tab) return;
+  document.querySelectorAll('.ot-tab').forEach(function(t) { t.classList.remove('active'); });
+  tab.classList.add('active');
+  document.querySelectorAll('.ot-sub').forEach(function(p) { p.classList.remove('active'); });
+  document.getElementById('ot-' + tab.dataset.ot).classList.add('active');
+});
+
+// ══════════════════════════════════════════
+// Hidden OT tab trigger
+// ══════════════════════════════════════════
+var brandClicks = 0, brandTimer;
+document.getElementById('brand-trigger').addEventListener('click', function() {
+  brandClicks++;
+  clearTimeout(brandTimer);
+  brandTimer = setTimeout(function() { brandClicks = 0; }, 600);
+  if (brandClicks >= 3) { brandClicks = 0; toggleOT(); }
+});
+
+document.addEventListener('keydown', function(e) {
+  if (e.ctrlKey && e.shiftKey && e.key === 'O') { e.preventDefault(); toggleOT(); }
+});
+
+function toggleOT() {
+  otVisible = !otVisible;
+  var otTab = document.getElementById('ot-tab-btn');
+  if (otVisible) {
+    if (!otTab) {
+      otTab = document.createElement('div');
+      otTab.className = 'tab ot-tab-btn';
+      otTab.id = 'ot-tab-btn';
+      otTab.dataset.panel = 'ot';
+      otTab.textContent = 'OT/ICS';
+      document.getElementById('main-tabs').appendChild(otTab);
+    } else {
+      otTab.style.display = '';
+    }
+    toast('OT/ICS interface enabled', 'info');
+    loadOTData();
+  } else if (otTab) {
+    otTab.style.display = 'none';
+    if (document.getElementById('panel-ot').classList.contains('active')) {
+      switchTab('dashboard');
+    }
+    toast('OT/ICS interface hidden', 'info');
+  }
+}
+
+// ══════════════════════════════════════════
+// Time formatting
+// ══════════════════════════════════════════
+function timeAgo(ts) {
+  if (!ts) return '—';
+  var s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 0) return 'future';
+  if (s < 5) return 'just now';
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  try {
+    return new Date(ts).toLocaleString();
+  } catch(e) { return ts; }
+}
+
+function fmtBytes(b) {
+  if (!b && b !== 0) return '—';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+function fmtUptime(secs) {
+  if (!secs && secs !== 0) return '—';
+  var d = Math.floor(secs / 86400);
+  var h = Math.floor((secs % 86400) / 3600);
+  var m = Math.floor((secs % 3600) / 60);
+  if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+  if (h > 0) return h + 'h ' + m + 'm';
+  return m + 'm ' + (secs % 60) + 's';
+}
+
+function sessionStatus(lastCheckin) {
+  if (!lastCheckin) return 'lost';
+  var age = Date.now() - new Date(lastCheckin).getTime();
+  if (age < 30000) return 'active';
+  if (age < 120000) return 'stale';
+  return 'lost';
+}
+
+function truncId(id) {
+  if (!id) return '—';
+  return id.length > 8 ? id.substring(0, 8) + '...' : id;
+}
+
+// ══════════════════════════════════════════
+// Engagement status badge
+// ══════════════════════════════════════════
+function engagementBadge(status) {
+  var cls = 'badge-gray';
+  if (status === 'planning') cls = 'badge-blue';
+  else if (status === 'active') cls = 'badge-green';
+  else if (status === 'completed') cls = 'badge-gray';
+  else if (status === 'killed') cls = 'badge-red';
+  return '<span class="badge ' + cls + '">' + esc(status || 'unknown') + '</span>';
+}
+
+function roleBadge(role) {
+  var cls = 'badge-gray';
+  if (role === 'admin') cls = 'badge-red';
+  else if (role === 'operator') cls = 'badge-blue';
+  else if (role === 'ot-operator') cls = 'badge-purple';
+  else if (role === 'builder') cls = 'badge-orange';
+  else if (role === 'observer') cls = 'badge-gray';
+  return '<span class="badge ' + cls + '">' + esc(role || 'unknown') + '</span>';
+}
+
+function payloadStatusBadge(status) {
+  var cls = 'badge-gray';
+  if (status === 'active') cls = 'badge-green';
+  else if (status === 'revoked') cls = 'badge-red';
+  else if (status === 'expired') cls = 'badge-gray';
+  return '<span class="badge ' + cls + '">' + esc(status || 'unknown') + '</span>';
+}
+
+function listenerStatusBadge(status) {
+  if (status === 'running' || status === 'active') return '<span class="badge badge-green">' + esc(status) + '</span>';
+  if (status === 'stopped' || status === 'error') return '<span class="badge badge-red">' + esc(status) + '</span>';
+  return '<span class="badge badge-gray">' + esc(status || 'unknown') + '</span>';
+}
+
+function auditEventBadge(type) {
+  var cls = 'badge-gray';
+  if (type === 'auth') cls = 'badge-blue';
+  else if (type === 'session') cls = 'badge-green';
+  else if (type === 'task') cls = 'badge-yellow';
+  else if (type === 'listener') cls = 'badge-orange';
+  else if (type === 'engagement') cls = 'badge-purple';
+  else if (type === 'payload') cls = 'badge-red';
+  else if (type === 'operator') cls = 'badge-blue';
+  else if (type === 'ot') cls = 'badge-purple';
+  return '<span class="badge ' + cls + '">' + esc(type || 'unknown') + '</span>';
+}
+
+function sevBadge(sev) {
+  var s = (sev || 'medium').toLowerCase();
+  var cls = 'badge-yellow';
+  if (s === 'critical') cls = 'badge-red';
+  else if (s === 'high') cls = 'badge-orange';
+  else if (s === 'low') cls = 'badge-green';
+  return '<span class="badge ' + cls + '">' + esc(sev) + '</span>';
+}
+
+// ══════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════
+function loadDashboard() {
+  // Server status
+  apiFetch('/api/server/status').then(function(d) {
+    if (d.error) return;
+    serverInfo = d;
+    var badge = document.getElementById('server-status-badge');
+    badge.classList.remove('offline');
+    badge.querySelector('.status-text').textContent = 'Online';
+    document.getElementById('server-info').innerHTML =
+      '<b>Version:</b><span class="mono">' + esc(d.version) + '</span>' +
+      '<b>Uptime:</b><span>' + fmtUptime(d.uptime_seconds) + '</span>' +
+      '<b>Memory:</b><span>' + (d.memory_mb ? d.memory_mb.toFixed(1) + ' MB' : '—') + '</span>' +
+      '<b>Goroutines:</b><span>' + esc(d.goroutines) + '</span>' +
+      '<b>Go Version:</b><span class="mono">' + esc(d.go_version) + '</span>' +
+      '<b>Hostname:</b><span>' + esc(d.hostname) + '</span>' +
+      '<b>OS / Arch:</b><span>' + esc(d.os) + ' / ' + esc(d.arch) + '</span>' +
+      '<b>Active Sessions:</b><span>' + esc(d.active_sessions) + '</span>';
+  }).catch(function() {
+    var badge = document.getElementById('server-status-badge');
+    badge.classList.add('offline');
+    badge.querySelector('.status-text').textContent = 'Offline';
+  });
+
+  // Counts
+  apiFetch('/api/beacons').then(function(d) {
+    if (Array.isArray(d)) {
+      beacons = d;
+      document.getElementById('d-beacons').textContent = d.length;
+    }
+  }).catch(function() {});
+
+  apiFetch('/api/listeners').then(function(d) {
+    if (Array.isArray(d)) {
+      listeners = d;
+      document.getElementById('d-listeners').textContent = d.length;
+    }
+  }).catch(function() {});
+
+  apiFetch('/api/engagements').then(function(d) {
+    if (Array.isArray(d)) {
+      engagements = d;
+      document.getElementById('d-engagements').textContent = d.length;
+      // Update active engagement indicator
+      var ae = d.find(function(e) { return e.status === 'active'; });
+      var el = document.getElementById('active-engagement');
+      if (ae) {
+        activeEngagementId = ae.id;
+        el.textContent = 'Engagement: ' + ae.name;
+        el.style.display = '';
+      } else {
+        el.style.display = 'none';
+      }
+    }
+  }).catch(function() {});
+}
+
+function renderDashboard() {
+  var now = Date.now();
+  var active = 0;
+  sessions.forEach(function(s) {
+    if (sessionStatus(s.last_checkin) === 'active') active++;
+  });
+  document.getElementById('d-sessions').textContent = active + ' / ' + sessions.length;
+
+  var tb = document.getElementById('dash-table');
+  if (sessions.length === 0) {
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--fg3);padding:20px">No sessions</td></tr>';
+    return;
+  }
+  tb.innerHTML = sessions.slice(0, 10).map(function(s) {
+    var cls = sessionStatus(s.last_checkin);
+    return '<tr>' +
+      '<td><span class="status-dot ' + cls + '"></span>' + esc(cls) + '</td>' +
+      '<td><b>' + esc(s.hostname) + '</b></td>' +
+      '<td>' + esc(s.username) + '</td>' +
+      '<td><span class="os-badge">' + esc(s.os) + ' ' + esc(s.arch) + '</span></td>' +
+      '<td class="mono">' + esc(s.remote_addr) + '</td>' +
+      '<td class="mono">' + timeAgo(s.last_checkin) + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+// ══════════════════════════════════════════
+// SESSIONS
+// ══════════════════════════════════════════
 function refreshSessions() {
-  apiFetch('/api/sessions').then(data => {
+  apiFetch('/api/sessions').then(function(data) {
     if (Array.isArray(data)) {
       sessions = data;
       renderSessions();
       renderDashboard();
     }
-  }).catch(() => {});
-}
-
-function renderDashboard() {
-  const now = Date.now();
-  let active = 0, stale = 0;
-  sessions.forEach(s => {
-    const age = now - new Date(s.last_checkin).getTime();
-    if (age < 30000) active++; else stale++;
-  });
-  document.getElementById('s-active').textContent = active;
-  document.getElementById('s-stale').textContent = stale;
-  document.getElementById('s-total').textContent = sessions.length;
-
-  const tb = document.getElementById('dash-table');
-  tb.innerHTML = sessions.slice(0, 10).map(s => {
-    const age = now - new Date(s.last_checkin).getTime();
-    const cls = age < 30000 ? 'active' : age < 120000 ? 'stale' : 'lost';
-    return `<tr>
-      <td><span class="status-dot ${cls}"></span>${cls}</td>
-      <td><b>${esc(s.hostname)}</b></td>
-      <td>${esc(s.username)}</td>
-      <td><span class="os-badge">${esc(s.os)} ${esc(s.arch)}</span></td>
-      <td class="mono">${esc(s.remote_addr)}</td>
-      <td class="mono">${timeAgo(s.last_checkin)}</td>
-    </tr>`;
-  }).join('');
+  }).catch(function() {});
 }
 
 function renderSessions() {
-  const q = (document.getElementById('search-input').value || '').toLowerCase();
-  const now = Date.now();
-  const filtered = sessions.filter(s =>
-    !q || s.hostname.toLowerCase().includes(q) || s.username.toLowerCase().includes(q) ||
-    s.os.toLowerCase().includes(q) || s.remote_addr.includes(q) || s.id.includes(q)
-  );
+  var q = (document.getElementById('search-sessions').value || '').toLowerCase();
+  var filtered = sessions.filter(function(s) {
+    if (!q) return true;
+    return (s.hostname || '').toLowerCase().indexOf(q) !== -1 ||
+           (s.username || '').toLowerCase().indexOf(q) !== -1 ||
+           (s.os || '').toLowerCase().indexOf(q) !== -1 ||
+           (s.remote_addr || '').indexOf(q) !== -1 ||
+           (s.id || '').indexOf(q) !== -1 ||
+           (s.process || '').toLowerCase().indexOf(q) !== -1;
+  });
 
-  const tb = document.getElementById('sess-table');
-  tb.innerHTML = filtered.map(s => {
-    const age = now - new Date(s.last_checkin).getTime();
-    const cls = age < 30000 ? 'active' : age < 120000 ? 'stale' : 'lost';
-    const sel = selectedSession === s.id ? 'selected' : '';
-    return `<tr class="${sel}" onclick="selectSession('${s.id}')" ondblclick="interactWith('${s.id}')">
-      <td><input type="radio" name="sess" ${selectedSession===s.id?'checked':''} onclick="selectSession('${s.id}')"></td>
-      <td><span class="status-dot ${cls}"></span>${cls}</td>
-      <td class="mono" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(s.id.substring(0,8))}…</td>
-      <td><b>${esc(s.hostname)}</b></td>
-      <td>${esc(s.username)}</td>
-      <td><span class="os-badge">${esc(s.os)} ${esc(s.arch)}</span></td>
-      <td class="mono">${s.pid}</td>
-      <td>${esc(s.process||'—')}</td>
-      <td>${esc(s.transport)}</td>
-      <td class="mono">${esc(s.remote_addr)}</td>
-      <td class="mono">${timeAgo(s.last_checkin)}</td>
-    </tr>`;
+  var tb = document.getElementById('sess-table');
+  if (filtered.length === 0) {
+    tb.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--fg3);padding:40px">' + (sessions.length ? 'No matches' : 'No sessions') + '</td></tr>';
+    return;
+  }
+  tb.innerHTML = filtered.map(function(s) {
+    var cls = sessionStatus(s.last_checkin);
+    var sel = selectedSession === s.id ? 'selected' : '';
+    return '<tr class="' + sel + '" onclick="selectSession(\'' + esc(s.id) + '\')" ondblclick="interactWith(\'' + esc(s.id) + '\')">' +
+      '<td><input type="radio" name="sess" ' + (selectedSession === s.id ? 'checked' : '') + '></td>' +
+      '<td><span class="status-dot ' + cls + '"></span>' + esc(cls) + '</td>' +
+      '<td class="mono" title="' + esc(s.id) + '" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">' + esc(truncId(s.id)) + '</td>' +
+      '<td><b>' + esc(s.hostname) + '</b></td>' +
+      '<td>' + esc(s.username) + '</td>' +
+      '<td><span class="os-badge">' + esc(s.os) + ' ' + esc(s.arch) + '</span></td>' +
+      '<td class="mono">' + esc(s.pid) + '</td>' +
+      '<td>' + esc(s.process || '—') + '</td>' +
+      '<td>' + esc(s.transport) + '</td>' +
+      '<td class="mono">' + esc(s.remote_addr) + '</td>' +
+      '<td class="mono">' + timeAgo(s.last_checkin) + '</td>' +
+    '</tr>';
   }).join('');
 }
 
-function selectSession(id) { selectedSession = id; renderSessions(); }
+function selectSession(id) {
+  selectedSession = id;
+  renderSessions();
+}
 
 function interactSelected() {
-  if (!selectedSession) return alert('Select a session first');
+  if (!selectedSession) { toast('Select a session first', 'error'); return; }
   interactWith(selectedSession);
 }
 
 function interactWith(id) {
   selectedSession = id;
-  const s = sessions.find(x => x.id === id);
+  var s = sessions.find(function(x) { return x.id === id; });
   if (!s) return;
-  document.getElementById('int-title').textContent = s.hostname + ' — ' + s.id.substring(0, 8);
+  document.getElementById('int-title').textContent = esc(s.hostname) + ' — ' + truncId(s.id);
   document.getElementById('int-meta').innerHTML =
-    `<span><b>User:</b> ${esc(s.username)}</span>
-     <span><b>OS:</b> ${esc(s.os)} ${esc(s.arch)}</span>
-     <span><b>PID:</b> ${s.pid}</span>
-     <span><b>IP:</b> ${esc(s.remote_addr)}</span>`;
-  document.querySelector('[data-panel="interact"]').click();
+    '<span><b>User:</b> ' + esc(s.username) + '</span>' +
+    '<span><b>OS:</b> ' + esc(s.os) + ' ' + esc(s.arch) + '</span>' +
+    '<span><b>PID:</b> ' + esc(s.pid) + '</span>' +
+    '<span><b>IP:</b> ' + esc(s.remote_addr) + '</span>';
+  switchTab('interact');
   document.getElementById('cmd-args').focus();
 }
 
-// ── TASK EXECUTION ──
-function sendTask() {
-  if (!selectedSession) { appendTerm('error', 'No session selected.'); return; }
-  const type = document.getElementById('cmd-type').value;
-  const args = document.getElementById('cmd-args').value;
-  document.getElementById('cmd-args').value = '';
-
-  appendTerm('prompt', `[${type}] ${args}`);
-
-  apiFetch(`/api/sessions/${selectedSession}/task`, {
-    method: 'POST',
-    body: { type, args }
-  }).then(d => {
-    if (d.error) { appendTerm('error', d.error); return; }
-    appendTerm('info', `Task ${d.task_id.substring(0,8)} queued, waiting for result...`);
-    pollResult(d.task_id);
-  }).catch(e => appendTerm('error', 'Request failed: ' + e.message));
+function backToSessions() {
+  switchTab('sessions');
 }
 
-function pollResult(taskId, attempts = 0) {
-  if (attempts > 60) { appendTerm('error', `Task ${taskId.substring(0,8)} timed out.`); return; }
-  setTimeout(() => {
-    apiFetch(`/api/tasks/${taskId}`).then(d => {
+function lockSelected() {
+  if (!selectedSession) { toast('Select a session first', 'error'); return; }
+  apiFetch('/api/sessions/' + selectedSession + '/lock', {
+    method: 'POST',
+    body: { operator: currentUser }
+  }).then(function(d) {
+    if (d.error) { toast(d.error, 'error'); return; }
+    toast('Session locked', 'success');
+  }).catch(function() { toast('Lock failed', 'error'); });
+}
+
+function unlockSelected() {
+  if (!selectedSession) { toast('Select a session first', 'error'); return; }
+  apiFetch('/api/sessions/' + selectedSession + '/unlock', {
+    method: 'POST'
+  }).then(function(d) {
+    if (d.error) { toast(d.error, 'error'); return; }
+    toast('Session unlocked', 'success');
+  }).catch(function() { toast('Unlock failed', 'error'); });
+}
+
+function killSelected() {
+  if (!selectedSession) { toast('Select a session first', 'error'); return; }
+  var s = sessions.find(function(x) { return x.id === selectedSession; });
+  var name = s ? s.hostname + ' (' + truncId(s.id) + ')' : truncId(selectedSession);
+  confirmModal('Kill Session', 'Are you sure you want to kill session <b>' + esc(name) + '</b>? This action cannot be undone.', function() {
+    apiFetch('/api/sessions/' + selectedSession, { method: 'DELETE' }).then(function(d) {
+      if (d.error) { toast(d.error, 'error'); return; }
+      toast('Session killed', 'success');
+      selectedSession = null;
+      refreshSessions();
+    }).catch(function() { toast('Kill failed', 'error'); });
+  });
+}
+
+// ══════════════════════════════════════════
+// INTERACT / TASKS
+// ══════════════════════════════════════════
+function sendTask() {
+  if (!selectedSession) { appendTerm('error', 'No session selected.'); return; }
+  var type = document.getElementById('cmd-type').value;
+  var args = document.getElementById('cmd-args').value;
+  document.getElementById('cmd-args').value = '';
+
+  appendTerm('prompt', '[' + type + '] ' + args);
+
+  apiFetch('/api/sessions/' + selectedSession + '/task', {
+    method: 'POST',
+    body: { type: type, args: args }
+  }).then(function(d) {
+    if (d.error) { appendTerm('error', d.error); return; }
+    appendTerm('info', 'Task ' + truncId(d.task_id) + ' queued, waiting for result...');
+    pollResult(d.task_id);
+  }).catch(function(e) { appendTerm('error', 'Request failed: ' + e.message); });
+}
+
+function pollResult(taskId, attempts) {
+  attempts = attempts || 0;
+  if (attempts > 60) { appendTerm('error', 'Task ' + truncId(taskId) + ' timed out.'); return; }
+  setTimeout(function() {
+    apiFetch('/api/tasks/' + taskId).then(function(d) {
       if (d.status === 'pending') { pollResult(taskId, attempts + 1); return; }
       if (d.success) {
         appendTerm('output', d.output || '(no output)');
       } else {
         appendTerm('error', d.error || 'Task failed');
       }
-    }).catch(() => pollResult(taskId, attempts + 1));
+    }).catch(function() { pollResult(taskId, attempts + 1); });
   }, 2000);
 }
 
 function appendTerm(cls, text) {
-  const term = document.getElementById('terminal');
-  const div = document.createElement('div');
+  var term = document.getElementById('terminal');
+  var div = document.createElement('div');
   div.className = cls;
   if (cls === 'prompt') {
-    div.innerHTML = '<span class="prompt">PC2 &gt; </span>' + esc(text);
+    var span = document.createElement('span');
+    span.className = 'prompt';
+    span.textContent = 'PC2 > ';
+    div.appendChild(span);
+    div.appendChild(document.createTextNode(text));
   } else {
     div.textContent = text;
   }
@@ -513,87 +1082,645 @@ function appendTerm(cls, text) {
   term.scrollTop = term.scrollHeight;
 }
 
-// ── OT DATA ──
+// ══════════════════════════════════════════
+// BEACONS
+// ══════════════════════════════════════════
+function refreshBeacons() {
+  apiFetch('/api/beacons').then(function(data) {
+    if (Array.isArray(data)) {
+      beacons = data;
+      renderBeacons();
+    }
+  }).catch(function() { toast('Failed to load beacons', 'error'); });
+}
+
+function renderBeacons() {
+  var q = (document.getElementById('search-beacons').value || '').toLowerCase();
+  var filtered = beacons.filter(function(b) {
+    if (!q) return true;
+    return (b.hostname || '').toLowerCase().indexOf(q) !== -1 ||
+           (b.username || '').toLowerCase().indexOf(q) !== -1 ||
+           (b.id || '').indexOf(q) !== -1;
+  });
+
+  var tb = document.getElementById('beacons-table');
+  if (filtered.length === 0) {
+    tb.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--fg3);padding:40px">No beacons</td></tr>';
+    return;
+  }
+  tb.innerHTML = filtered.map(function(b) {
+    var cls = sessionStatus(b.last_checkin);
+    var intervalStr = b.interval_ms ? (b.interval_ms / 1000).toFixed(0) + 's' : '—';
+    var jitterStr = b.jitter_pct !== undefined ? b.jitter_pct + '%' : '—';
+    return '<tr>' +
+      '<td><span class="status-dot ' + cls + '"></span>' + esc(cls) + '</td>' +
+      '<td class="mono" title="' + esc(b.id) + '">' + esc(truncId(b.id)) + '</td>' +
+      '<td><b>' + esc(b.hostname) + '</b></td>' +
+      '<td>' + esc(b.username) + '</td>' +
+      '<td><span class="os-badge">' + esc(b.os) + ' ' + esc(b.arch) + '</span></td>' +
+      '<td>' + esc(b.transport) + '</td>' +
+      '<td>' + esc(intervalStr) + '</td>' +
+      '<td>' + esc(jitterStr) + '</td>' +
+      '<td class="mono">' + timeAgo(b.last_checkin) + '</td>' +
+      '<td class="mono">' + (b.next_checkin ? fmtTime(b.next_checkin) : '—') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+// ══════════════════════════════════════════
+// LISTENERS
+// ══════════════════════════════════════════
+function refreshListeners() {
+  apiFetch('/api/listeners').then(function(data) {
+    if (Array.isArray(data)) {
+      listeners = data;
+      renderListeners();
+    }
+  }).catch(function() { toast('Failed to load listeners', 'error'); });
+
+  apiFetch('/api/listeners/profiles').then(function(data) {
+    if (Array.isArray(data)) {
+      profiles = data;
+      renderProfiles();
+    }
+  }).catch(function() {});
+}
+
+function renderListeners() {
+  var tb = document.getElementById('listeners-table');
+  if (listeners.length === 0) {
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--fg3);padding:40px">No listeners</td></tr>';
+    return;
+  }
+  tb.innerHTML = listeners.map(function(l) {
+    return '<tr>' +
+      '<td class="mono" title="' + esc(l.id) + '">' + esc(truncId(l.id)) + '</td>' +
+      '<td>' + esc(l.type) + '</td>' +
+      '<td class="mono">' + esc(l.bind_addr) + '</td>' +
+      '<td class="mono">' + esc(l.port) + '</td>' +
+      '<td class="mono">' + esc(truncId(l.engagement_id)) + '</td>' +
+      '<td>' + listenerStatusBadge(l.status) + '</td>' +
+      '<td>' + esc(l.active_connections != null ? l.active_connections : '—') + '</td>' +
+      '<td><button class="btn danger" style="padding:3px 10px;font-size:11px" onclick="stopListener(\'' + esc(l.id) + '\')">Stop</button></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderProfiles() {
+  var tb = document.getElementById('profiles-table');
+  if (profiles.length === 0) {
+    tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--fg3);padding:20px">No profiles</td></tr>';
+    return;
+  }
+  tb.innerHTML = profiles.map(function(p) {
+    return '<tr>' +
+      '<td class="mono" title="' + esc(p.id) + '">' + esc(truncId(p.id)) + '</td>' +
+      '<td><b>' + esc(p.name) + '</b></td>' +
+      '<td>' + esc(p.description || '—') + '</td>' +
+      '<td>' + esc(p.version || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function showNewListenerModal() {
+  // Pre-fetch engagements and profiles for dropdowns
+  Promise.all([
+    apiFetch('/api/engagements').catch(function() { return []; }),
+    apiFetch('/api/listeners/profiles').catch(function() { return []; })
+  ]).then(function(results) {
+    var engs = Array.isArray(results[0]) ? results[0] : [];
+    var profs = Array.isArray(results[1]) ? results[1] : [];
+
+    var engOpts = '<option value="">-- Select --</option>' +
+      engs.map(function(e) { return '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>'; }).join('');
+    var profOpts = '<option value="">-- None --</option>' +
+      profs.map(function(p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>'; }).join('');
+
+    openModal(
+      '<h2>New Listener</h2>' +
+      '<div class="form-group"><label>Type</label><select id="nl-type"><option value="mtls">mTLS</option><option value="https">HTTPS</option><option value="dns">DNS</option><option value="wireguard">WireGuard</option></select></div>' +
+      '<div class="form-group"><label>Bind Address</label><input type="text" id="nl-bind" placeholder="0.0.0.0"></div>' +
+      '<div class="form-group"><label>Port</label><input type="number" id="nl-port" placeholder="443"></div>' +
+      '<div class="form-group"><label>Engagement</label><select id="nl-engagement">' + engOpts + '</select></div>' +
+      '<div class="form-group"><label>C2 Profile</label><select id="nl-profile">' + profOpts + '</select></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn" onclick="closeModal()">Cancel</button>' +
+        '<button class="btn primary" onclick="createListener()">Create</button>' +
+      '</div>'
+    );
+  });
+}
+
+function createListener() {
+  var body = {
+    type: document.getElementById('nl-type').value,
+    bind_addr: document.getElementById('nl-bind').value || '0.0.0.0',
+    port: parseInt(document.getElementById('nl-port').value) || 443,
+    engagement_id: document.getElementById('nl-engagement').value || undefined,
+    c2_profile_id: document.getElementById('nl-profile').value || undefined
+  };
+  apiFetch('/api/listeners', { method: 'POST', body: body }).then(function(d) {
+    if (d.error) { toast(d.error, 'error'); return; }
+    closeModal();
+    toast('Listener created', 'success');
+    refreshListeners();
+  }).catch(function() { toast('Failed to create listener', 'error'); });
+}
+
+function stopListener(id) {
+  confirmModal('Stop Listener', 'Are you sure you want to stop listener <b>' + esc(truncId(id)) + '</b>?', function() {
+    apiFetch('/api/listeners/' + id, { method: 'DELETE' }).then(function(d) {
+      if (d.error) { toast(d.error, 'error'); return; }
+      toast('Listener stopped', 'success');
+      refreshListeners();
+    }).catch(function() { toast('Failed to stop listener', 'error'); });
+  });
+}
+
+// ══════════════════════════════════════════
+// ENGAGEMENTS
+// ══════════════════════════════════════════
+function refreshEngagements() {
+  apiFetch('/api/engagements').then(function(data) {
+    if (Array.isArray(data)) {
+      engagements = data;
+      renderEngagements();
+    }
+  }).catch(function() { toast('Failed to load engagements', 'error'); });
+}
+
+function renderEngagements() {
+  var tb = document.getElementById('engagements-table');
+  if (engagements.length === 0) {
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--fg3);padding:40px">No engagements</td></tr>';
+    return;
+  }
+  tb.innerHTML = engagements.map(function(e) {
+    var tw = '';
+    if (e.time_window_start || e.time_window_end) {
+      tw = (e.time_window_start ? fmtTime(e.time_window_start) : '?') + ' — ' + (e.time_window_end ? fmtTime(e.time_window_end) : '?');
+    } else {
+      tw = '—';
+    }
+    return '<tr>' +
+      '<td class="mono" title="' + esc(e.id) + '">' + esc(truncId(e.id)) + '</td>' +
+      '<td><b>' + esc(e.name) + '</b></td>' +
+      '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">' + esc(e.description || '—') + '</td>' +
+      '<td>' + engagementBadge(e.status) + '</td>' +
+      '<td class="mono">' + esc(e.authorization_ref || '—') + '</td>' +
+      '<td style="font-size:11px">' + esc(tw) + '</td>' +
+      '<td>' + esc(e.created_by || '—') + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="useEngagement(\'' + esc(e.id) + '\',\'' + esc(e.name) + '\')">Use</button>' +
+        '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="scopeCheckModal(\'' + esc(e.id) + '\')">Scope</button>' +
+        '<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="killSwitchEngagement(\'' + esc(e.id) + '\',\'' + esc(e.name) + '\')">Kill</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function showNewEngagementModal() {
+  openModal(
+    '<h2>New Engagement</h2>' +
+    '<div class="form-group"><label>Name</label><input type="text" id="ne-name" placeholder="Engagement name"></div>' +
+    '<div class="form-group"><label>Description</label><textarea id="ne-desc" placeholder="Description"></textarea></div>' +
+    '<div class="form-group"><label>Authorization Reference</label><input type="text" id="ne-auth" placeholder="AUTH-2024-001"></div>' +
+    '<div class="form-group"><label>Scope Config (JSON)</label><textarea id="ne-scope" placeholder=\'{"targets":["10.0.0.0/24"]}\' style="font-family:monospace;font-size:12px"></textarea></div>' +
+    '<div class="form-group"><label>Time Window Start</label><input type="datetime-local" id="ne-start"></div>' +
+    '<div class="form-group"><label>Time Window End</label><input type="datetime-local" id="ne-end"></div>' +
+    '<div class="modal-actions">' +
+      '<button class="btn" onclick="closeModal()">Cancel</button>' +
+      '<button class="btn primary" onclick="createEngagement()">Create</button>' +
+    '</div>'
+  );
+}
+
+function createEngagement() {
+  var body = {
+    name: document.getElementById('ne-name').value,
+    description: document.getElementById('ne-desc').value,
+    authorization_ref: document.getElementById('ne-auth').value
+  };
+  var scope = document.getElementById('ne-scope').value.trim();
+  if (scope) {
+    try { body.scope_config = JSON.parse(scope); }
+    catch(e) { toast('Invalid scope JSON', 'error'); return; }
+  }
+  var start = document.getElementById('ne-start').value;
+  var end = document.getElementById('ne-end').value;
+  if (start) body.time_window_start = new Date(start).toISOString();
+  if (end) body.time_window_end = new Date(end).toISOString();
+
+  if (!body.name) { toast('Name is required', 'error'); return; }
+
+  apiFetch('/api/engagements', { method: 'POST', body: body }).then(function(d) {
+    if (d.error) { toast(d.error, 'error'); return; }
+    closeModal();
+    toast('Engagement created', 'success');
+    refreshEngagements();
+    loadDashboard();
+  }).catch(function() { toast('Failed to create engagement', 'error'); });
+}
+
+function useEngagement(id, name) {
+  activeEngagementId = id;
+  var el = document.getElementById('active-engagement');
+  el.textContent = 'Engagement: ' + name;
+  el.style.display = '';
+  toast('Active engagement set to: ' + name, 'success');
+}
+
+function killSwitchEngagement(id, name) {
+  confirmModal('Kill Switch', 'Are you sure you want to activate the kill switch for engagement <b>' + esc(name) + '</b>? This will terminate all associated sessions and listeners.', function() {
+    apiFetch('/api/engagements/' + id + '/killswitch', { method: 'POST' }).then(function(d) {
+      if (d.error) { toast(d.error, 'error'); return; }
+      toast('Kill switch activated for ' + name, 'success');
+      refreshEngagements();
+      refreshSessions();
+      loadDashboard();
+    }).catch(function() { toast('Kill switch failed', 'error'); });
+  });
+}
+
+function scopeCheckModal(engId) {
+  openModal(
+    '<h2>Scope Check</h2>' +
+    '<div class="form-group"><label>Target (IP, hostname, or CIDR)</label><input type="text" id="sc-target" placeholder="192.168.1.1"></div>' +
+    '<div id="sc-result" style="margin-top:12px;display:none"></div>' +
+    '<div class="modal-actions">' +
+      '<button class="btn" onclick="closeModal()">Close</button>' +
+      '<button class="btn primary" onclick="doScopeCheck(\'' + esc(engId) + '\')">Check</button>' +
+    '</div>'
+  );
+}
+
+function doScopeCheck(engId) {
+  var target = document.getElementById('sc-target').value.trim();
+  if (!target) { toast('Enter a target', 'error'); return; }
+  apiFetch('/api/engagements/' + engId + '/scope-check', {
+    method: 'POST',
+    body: { target: target }
+  }).then(function(d) {
+    var el = document.getElementById('sc-result');
+    el.style.display = '';
+    if (d.in_scope) {
+      el.innerHTML = '<span class="badge badge-green" style="font-size:12px;padding:4px 12px">IN SCOPE</span> <span style="color:var(--fg2);font-size:13px;margin-left:8px">' + esc(d.reason || '') + '</span>';
+    } else {
+      el.innerHTML = '<span class="badge badge-red" style="font-size:12px;padding:4px 12px">OUT OF SCOPE</span> <span style="color:var(--fg2);font-size:13px;margin-left:8px">' + esc(d.reason || '') + '</span>';
+    }
+  }).catch(function() { toast('Scope check failed', 'error'); });
+}
+
+// ══════════════════════════════════════════
+// PAYLOADS
+// ══════════════════════════════════════════
+function refreshPayloads() {
+  apiFetch('/api/payloads').then(function(data) {
+    if (Array.isArray(data)) {
+      payloads = data;
+      renderPayloads();
+    }
+  }).catch(function() { toast('Failed to load payloads', 'error'); });
+}
+
+function renderPayloads() {
+  var tb = document.getElementById('payloads-table');
+  if (payloads.length === 0) {
+    tb.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--fg3);padding:40px">No payloads</td></tr>';
+    return;
+  }
+  tb.innerHTML = payloads.map(function(p) {
+    var sha = p.sha256 ? p.sha256.substring(0, 12) + '...' : '—';
+    var transports = Array.isArray(p.transports) ? p.transports.join(', ') : esc(p.transports || '—');
+    return '<tr>' +
+      '<td class="mono" title="' + esc(p.id) + '">' + esc(truncId(p.id)) + '</td>' +
+      '<td>' + esc(p.target_os) + '</td>' +
+      '<td>' + esc(p.target_arch) + '</td>' +
+      '<td>' + esc(p.mode) + '</td>' +
+      '<td>' + esc(p.format) + '</td>' +
+      '<td class="mono" title="' + esc(p.sha256) + '">' + esc(sha) + '</td>' +
+      '<td>' + fmtBytes(p.file_size) + '</td>' +
+      '<td class="mono">' + esc(truncId(p.engagement_id)) + '</td>' +
+      '<td>' + payloadStatusBadge(p.status) + '</td>' +
+      '<td class="mono" style="font-size:11px">' + fmtTime(p.created_at) + '</td>' +
+      '<td style="white-space:nowrap">' +
+        (p.status === 'active' ? '<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="revokePayload(\'' + esc(p.id) + '\')">Revoke</button>' : '') +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function showGeneratePayloadModal() {
+  apiFetch('/api/engagements').catch(function() { return []; }).then(function(engs) {
+    if (!Array.isArray(engs)) engs = [];
+    var engOpts = '<option value="">-- Select --</option>' +
+      engs.map(function(e) { return '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>'; }).join('');
+
+    openModal(
+      '<h2>Generate Payload</h2>' +
+      '<div class="form-group"><label>Target OS</label><select id="gp-os"><option value="windows">Windows</option><option value="linux">Linux</option><option value="darwin">macOS (Darwin)</option></select></div>' +
+      '<div class="form-group"><label>Target Arch</label><select id="gp-arch"><option value="amd64">amd64</option><option value="arm64">arm64</option><option value="386">386</option></select></div>' +
+      '<div class="form-group"><label>Mode</label><select id="gp-mode"><option value="session">Session</option><option value="beacon">Beacon</option></select></div>' +
+      '<div class="form-group"><label>Transports</label><div class="checkbox-row"><label><input type="checkbox" value="mtls" checked> mTLS</label><label><input type="checkbox" value="https"> HTTPS</label><label><input type="checkbox" value="dns"> DNS</label><label><input type="checkbox" value="wireguard"> WireGuard</label></div></div>' +
+      '<div class="form-group"><label>Format</label><select id="gp-format"><option value="exe">EXE</option><option value="dll">DLL</option><option value="shellcode">Shellcode</option><option value="shared">Shared Library</option></select></div>' +
+      '<div class="form-group"><label>Engagement</label><select id="gp-engagement">' + engOpts + '</select></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn" onclick="closeModal()">Cancel</button>' +
+        '<button class="btn primary" onclick="generatePayload()">Generate</button>' +
+      '</div>'
+    );
+  });
+}
+
+function generatePayload() {
+  var transports = [];
+  document.querySelectorAll('#modal-content .checkbox-row input[type="checkbox"]:checked').forEach(function(cb) {
+    transports.push(cb.value);
+  });
+  if (transports.length === 0) { toast('Select at least one transport', 'error'); return; }
+
+  var body = {
+    target_os: document.getElementById('gp-os').value,
+    target_arch: document.getElementById('gp-arch').value,
+    mode: document.getElementById('gp-mode').value,
+    transports: transports,
+    format: document.getElementById('gp-format').value,
+    engagement_id: document.getElementById('gp-engagement').value || undefined
+  };
+
+  apiFetch('/api/payloads/generate', { method: 'POST', body: body }).then(function(d) {
+    if (d.error) { toast(d.error, 'error'); return; }
+    closeModal();
+    toast('Payload generated', 'success');
+    refreshPayloads();
+  }).catch(function() { toast('Failed to generate payload', 'error'); });
+}
+
+function revokePayload(id) {
+  confirmModal('Revoke Payload', 'Are you sure you want to revoke payload <b>' + esc(truncId(id)) + '</b>? This will prevent the implant from connecting.', function() {
+    apiFetch('/api/payloads/' + id + '/revoke', { method: 'POST' }).then(function(d) {
+      if (d.error) { toast(d.error, 'error'); return; }
+      toast('Payload revoked', 'success');
+      refreshPayloads();
+    }).catch(function() { toast('Failed to revoke payload', 'error'); });
+  });
+}
+
+// ══════════════════════════════════════════
+// OPERATORS
+// ══════════════════════════════════════════
+function refreshOperators() {
+  apiFetch('/api/operators').then(function(data) {
+    if (Array.isArray(data)) {
+      operators = data;
+      renderOperators();
+    }
+  }).catch(function() { toast('Failed to load operators', 'error'); });
+}
+
+function renderOperators() {
+  var tb = document.getElementById('operators-table');
+  if (operators.length === 0) {
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--fg3);padding:40px">No operators</td></tr>';
+    return;
+  }
+  tb.innerHTML = operators.map(function(o) {
+    return '<tr>' +
+      '<td class="mono" title="' + esc(o.id) + '">' + esc(truncId(o.id)) + '</td>' +
+      '<td><b>' + esc(o.name) + '</b></td>' +
+      '<td>' + roleBadge(o.role) + '</td>' +
+      '<td>' + (o.mfa_enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-gray">Disabled</span>') + '</td>' +
+      '<td class="mono" style="font-size:11px">' + (o.last_active_at ? fmtTime(o.last_active_at) : '—') + '</td>' +
+      '<td class="mono">' + esc(o.source_ip || '—') + '</td>' +
+      '<td><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="removeOperator(\'' + esc(o.id) + '\',\'' + esc(o.name) + '\')">Remove</button></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function showAddOperatorModal() {
+  openModal(
+    '<h2>Add Operator</h2>' +
+    '<div class="form-group"><label>Name</label><input type="text" id="ao-name" placeholder="Operator name"></div>' +
+    '<div class="form-group"><label>Role</label><select id="ao-role"><option value="operator">Operator</option><option value="admin">Admin</option><option value="ot-operator">OT Operator</option><option value="builder">Builder</option><option value="observer">Observer</option></select></div>' +
+    '<div class="form-group"><label>Password</label><input type="password" id="ao-pass" placeholder="Strong password"></div>' +
+    '<div class="modal-actions">' +
+      '<button class="btn" onclick="closeModal()">Cancel</button>' +
+      '<button class="btn primary" onclick="addOperator()">Add</button>' +
+    '</div>'
+  );
+}
+
+function addOperator() {
+  var name = document.getElementById('ao-name').value.trim();
+  var role = document.getElementById('ao-role').value;
+  var pass = document.getElementById('ao-pass').value;
+  if (!name || !pass) { toast('Name and password are required', 'error'); return; }
+
+  apiFetch('/api/operators', {
+    method: 'POST',
+    body: { name: name, role: role, password: pass }
+  }).then(function(d) {
+    if (d.error) { toast(d.error, 'error'); return; }
+    closeModal();
+    toast('Operator added', 'success');
+    refreshOperators();
+  }).catch(function() { toast('Failed to add operator', 'error'); });
+}
+
+function removeOperator(id, name) {
+  confirmModal('Remove Operator', 'Are you sure you want to remove operator <b>' + esc(name) + '</b>? This cannot be undone.', function() {
+    apiFetch('/api/operators/' + id, { method: 'DELETE' }).then(function(d) {
+      if (d.error) { toast(d.error, 'error'); return; }
+      toast('Operator removed', 'success');
+      refreshOperators();
+    }).catch(function() { toast('Failed to remove operator', 'error'); });
+  });
+}
+
+// ══════════════════════════════════════════
+// AUDIT
+// ══════════════════════════════════════════
+function refreshAudit() {
+  var params = new URLSearchParams();
+  var opId = document.getElementById('audit-operator').value.trim();
+  var evType = document.getElementById('audit-event-type').value;
+  if (opId) params.set('operator_id', opId);
+  if (evType) params.set('event_type', evType);
+  params.set('page', auditPage);
+  params.set('limit', AUDIT_LIMIT);
+
+  apiFetch('/api/audit?' + params.toString()).then(function(data) {
+    if (Array.isArray(data)) {
+      auditEntries = data;
+      renderAudit();
+    }
+  }).catch(function() { toast('Failed to load audit log', 'error'); });
+}
+
+function renderAudit() {
+  var tb = document.getElementById('audit-table');
+  if (auditEntries.length === 0) {
+    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--fg3);padding:40px">No audit entries</td></tr>';
+  } else {
+    tb.innerHTML = auditEntries.map(function(a) {
+      return '<tr>' +
+        '<td class="mono" style="font-size:11px">' + fmtTime(a.created_at) + '</td>' +
+        '<td class="mono">' + esc(truncId(a.operator_id)) + '</td>' +
+        '<td class="mono">' + esc(truncId(a.engagement_id)) + '</td>' +
+        '<td class="mono">' + esc(truncId(a.session_id)) + '</td>' +
+        '<td>' + auditEventBadge(a.event_type) + '</td>' +
+        '<td>' + esc(a.action || '—') + '</td>' +
+        '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="' + esc(a.target) + '">' + esc(a.target || '—') + '</td>' +
+        '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="' + esc(a.result_summary) + '">' + esc(a.result_summary || '—') + '</td>' +
+        '<td class="mono">' + esc(a.source_ip || '—') + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  // Pagination
+  document.getElementById('audit-page-info').textContent = 'Page ' + auditPage;
+  document.getElementById('audit-prev').disabled = auditPage <= 1;
+  document.getElementById('audit-next').disabled = auditEntries.length < AUDIT_LIMIT;
+}
+
+function auditPrev() {
+  if (auditPage > 1) { auditPage--; refreshAudit(); }
+}
+
+function auditNext() {
+  auditPage++;
+  refreshAudit();
+}
+
+function verifyAuditChain() {
+  apiFetch('/api/audit/verify').then(function(d) {
+    if (d.valid) {
+      openModal(
+        '<h2>Audit Chain Verification</h2>' +
+        '<p class="confirm-text"><span class="badge badge-green" style="font-size:13px;padding:4px 12px">VALID</span><br><br>All <b>' + esc(d.entries_checked) + '</b> audit entries passed integrity verification. The chain is intact.</p>' +
+        '<div class="modal-actions"><button class="btn primary" onclick="closeModal()">OK</button></div>'
+      );
+    } else {
+      openModal(
+        '<h2>Audit Chain Verification</h2>' +
+        '<p class="confirm-text"><span class="badge badge-red" style="font-size:13px;padding:4px 12px">BROKEN</span><br><br>Integrity check failed. Checked <b>' + esc(d.entries_checked) + '</b> entries.<br>First broken entry: <span class="mono">' + esc(d.first_broken) + '</span></p>' +
+        '<div class="modal-actions"><button class="btn primary" onclick="closeModal()">OK</button></div>'
+      );
+    }
+  }).catch(function() { toast('Verification failed', 'error'); });
+}
+
+function exportAudit() {
+  window.open(API + '/api/audit/export', '_blank');
+}
+
+// ══════════════════════════════════════════
+// OT / ICS
+// ══════════════════════════════════════════
 function loadOTData() {
-  apiFetch('/api/ot/assets').then(d => {
-    const grid = document.getElementById('ot-assets-grid');
-    const empty = document.getElementById('ot-assets-empty');
+  // Assets
+  apiFetch('/api/ot/assets').then(function(d) {
+    var grid = document.getElementById('ot-assets-grid');
+    var empty = document.getElementById('ot-assets-empty');
     if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
     empty.style.display = 'none';
-    grid.innerHTML = d.map(a => `<div class="ot-card">
-      <h3>${esc(a.hostname || a.ip)}</h3>
-      <div class="detail"><b>Role:</b> ${esc(a.role||'Unknown')}</div>
-      <div class="detail"><b>Vendor:</b> ${esc(a.vendor||'—')} ${esc(a.model||'')}</div>
-      <div class="detail"><b>Protocol:</b> ${esc(a.protocol||'—')}</div>
-      <div class="detail"><b>Purdue Level:</b> ${a.purdue_level}</div>
-      <div class="detail"><b>IP:</b> <span class="mono">${esc(a.ip)}</span></div>
-      ${a.safety_rated ? '<div class="detail" style="color:var(--red)"><b>Safety Rated — SIL '+a.sil_level+'</b></div>' : ''}
-    </div>`).join('');
-  }).catch(() => {});
+    grid.innerHTML = d.map(function(a) {
+      var protocols = Array.isArray(a.protocols) ? a.protocols.join(', ') : esc(a.protocol || '—');
+      return '<div class="ot-card">' +
+        '<h3>' + esc(a.hostname || a.ip) + '</h3>' +
+        '<div class="detail"><b>IP:</b> <span class="mono">' + esc(a.ip) + '</span></div>' +
+        '<div class="detail"><b>Role:</b> ' + esc(a.role || 'Unknown') + '</div>' +
+        '<div class="detail"><b>Vendor:</b> ' + esc(a.vendor || '—') + ' ' + esc(a.model || '') + '</div>' +
+        '<div class="detail"><b>Protocols:</b> ' + esc(protocols) + '</div>' +
+        '<div class="detail"><b>Purdue Level:</b> ' + esc(a.purdue_level) + '</div>' +
+        (a.safety_rated ? '<div class="detail" style="color:var(--red)"><b>Safety Rated — SIL ' + esc(a.sil_level) + '</b></div>' : '') +
+      '</div>';
+    }).join('');
+  }).catch(function() {});
 
-  apiFetch('/api/ot/vulns').then(d => {
-    const grid = document.getElementById('ot-vulns-grid');
-    const empty = document.getElementById('ot-vulns-empty');
+  // Vulnerabilities
+  apiFetch('/api/ot/vulns').then(function(d) {
+    var grid = document.getElementById('ot-vulns-grid');
+    var empty = document.getElementById('ot-vulns-empty');
     if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
     empty.style.display = 'none';
-    grid.innerHTML = d.map(v => `<div class="ot-card">
-      <h3>${esc(v.cve_id || 'Finding')}</h3>
-      <div class="detail">${esc(v.description)}</div>
-      <div class="detail"><b>Target:</b> ${esc(v.target)}</div>
-      <div class="detail"><b>CVSS:</b> ${v.cvss}</div>
-      <span class="severity sev-${(v.severity||'medium').toLowerCase()}">${esc(v.severity)}</span>
-    </div>`).join('');
-  }).catch(() => {});
+    grid.innerHTML = d.map(function(v) {
+      return '<div class="ot-card">' +
+        '<h3>' + esc(v.cve_id || 'Finding') + '</h3>' +
+        '<div class="detail">' + esc(v.description) + '</div>' +
+        '<div class="detail"><b>Target:</b> ' + esc(v.target) + '</div>' +
+        '<div class="detail"><b>CVSS:</b> ' + esc(v.cvss) + '</div>' +
+        sevBadge(v.severity) +
+      '</div>';
+    }).join('');
+  }).catch(function() {});
 
-  apiFetch('/api/ot/credentials').then(d => {
-    const grid = document.getElementById('ot-creds-grid');
-    const empty = document.getElementById('ot-creds-empty');
+  // Credentials
+  apiFetch('/api/ot/credentials').then(function(d) {
+    var grid = document.getElementById('ot-creds-grid');
+    var empty = document.getElementById('ot-creds-empty');
     if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
     empty.style.display = 'none';
-    grid.innerHTML = d.map(c => `<div class="ot-card">
-      <h3>${esc(c.target)}:${c.port}</h3>
-      <div class="detail"><b>Service:</b> ${esc(c.service)}</div>
-      <div class="detail"><b>Username:</b> ${esc(c.username)}</div>
-      <div class="detail"><b>Default Cred:</b> ${c.is_default ? 'Yes' : 'No'}</div>
-      <span class="severity sev-${(c.severity||'medium').toLowerCase()}">${esc(c.severity)}</span>
-    </div>`).join('');
-  }).catch(() => {});
+    grid.innerHTML = d.map(function(c) {
+      return '<div class="ot-card">' +
+        '<h3>' + esc(c.target) + ':' + esc(c.port) + '</h3>' +
+        '<div class="detail"><b>Service:</b> ' + esc(c.service) + '</div>' +
+        '<div class="detail"><b>Username:</b> ' + esc(c.username) + '</div>' +
+        '<div class="detail"><b>Default Cred:</b> ' + (c.is_default ? 'Yes' : 'No') + '</div>' +
+        sevBadge(c.severity) +
+      '</div>';
+    }).join('');
+  }).catch(function() {});
 
-  apiFetch('/api/ot/compliance').then(d => {
-    const grid = document.getElementById('ot-compliance-grid');
-    const empty = document.getElementById('ot-compliance-empty');
+  // Topology
+  apiFetch('/api/ot/topology').then(function(d) {
+    var grid = document.getElementById('ot-topo-grid');
+    var empty = document.getElementById('ot-topo-empty');
     if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
     empty.style.display = 'none';
-    grid.innerHTML = d.map(c => `<div class="ot-card">
-      <h3>${esc(c.framework)} — ${esc(c.section)}</h3>
-      <div class="detail">${esc(c.description)}</div>
-      <div class="detail"><b>Requirement:</b> ${esc(c.requirement)}</div>
-      <div class="detail"><b>Status:</b> ${esc(c.status)}</div>
-      <span class="severity sev-${(c.severity||'medium').toLowerCase()}">${esc(c.severity)}</span>
-    </div>`).join('');
-  }).catch(() => {});
+    grid.innerHTML = d.map(function(t) {
+      return '<div class="ot-card">' +
+        '<h3>' + esc(t.source_ip || t.source) + ' &#8594; ' + esc(t.target_ip || t.target) + '</h3>' +
+        '<div class="detail"><b>Protocol:</b> ' + esc(t.protocol || '—') + '</div>' +
+        '<div class="detail"><b>Port:</b> ' + esc(t.port || '—') + '</div>' +
+      '</div>';
+    }).join('');
+  }).catch(function() {});
+
+  // Compliance
+  apiFetch('/api/ot/compliance').then(function(d) {
+    var grid = document.getElementById('ot-compliance-grid');
+    var empty = document.getElementById('ot-compliance-empty');
+    if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    grid.innerHTML = d.map(function(c) {
+      return '<div class="ot-card">' +
+        '<h3>' + esc(c.framework) + ' — ' + esc(c.section) + '</h3>' +
+        '<div class="detail"><b>Requirement:</b> ' + esc(c.requirement) + '</div>' +
+        '<div class="detail"><b>Status:</b> ' + esc(c.status) + '</div>' +
+        sevBadge(c.severity) +
+      '</div>';
+    }).join('');
+  }).catch(function() {});
+
+  // Reports
+  apiFetch('/api/ot/reports').then(function(d) {
+    var grid = document.getElementById('ot-reports-grid');
+    var empty = document.getElementById('ot-reports-empty');
+    if (!Array.isArray(d) || d.length === 0) { grid.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    grid.innerHTML = d.map(function(r) {
+      return '<div class="ot-card">' +
+        '<h3>' + esc(r.title || 'Report') + '</h3>' +
+        '<div class="detail"><b>Format:</b> ' + esc(r.format || '—') + '</div>' +
+        '<div class="detail"><b>Generated:</b> ' + fmtTime(r.generated_at || r.created_at) + '</div>' +
+        '<div class="detail"><b>Assets:</b> ' + esc(r.asset_count != null ? r.asset_count : '—') + '</div>' +
+        '<div class="detail"><b>Vulnerabilities:</b> ' + esc(r.vuln_count != null ? r.vuln_count : '—') + '</div>' +
+        '<div class="detail"><b>Risk Score:</b> ' + esc(r.risk_score != null ? r.risk_score : '—') + '</div>' +
+      '</div>';
+    }).join('');
+  }).catch(function() {});
 }
-
-// ── UTILS ──
-function esc(s) {
-  if (!s) return '';
-  const d = document.createElement('div');
-  d.textContent = String(s);
-  return d.innerHTML;
-}
-
-function timeAgo(ts) {
-  const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (s < 5) return 'just now';
-  if (s < 60) return s + 's ago';
-  if (s < 3600) return Math.floor(s/60) + 'm ago';
-  return Math.floor(s/3600) + 'h ago';
-}
-
-// keyboard shortcut hint
-document.getElementById('login-pass').addEventListener('keydown', e => {
-  if (e.key === 'Enter') doLogin();
-});
 </script>
 </body>
 </html>
