@@ -54,7 +54,6 @@ func main() {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
 	log.Println("Database migrated")
-	_ = db // available for future persistence wiring
 
 	// --- TLS configuration ---
 	tlsConfig, err := buildTLSConfig(*certFile, *keyFile, *caFile)
@@ -90,7 +89,7 @@ func main() {
 	}()
 
 	// --- Operator HTTP API ---
-	apiRouter := httpapi.NewRouter(implantServer)
+	apiRouter := httpapi.NewRouter(implantServer, db)
 	apiServer := &http.Server{
 		Addr:    *apiAddr,
 		Handler: apiRouter,

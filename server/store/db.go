@@ -75,5 +75,16 @@ func Migrate(db *gorm.DB) error {
 		&models.AuditEntry{},
 		&models.C2Profile{},
 		&models.Role{},
+		// OT/ICS models
+		&models.OTAssetRecord{},
+		&models.OTCredentialFinding{},
+		&models.OTVulnFinding{},
+		&models.OTSegmentationGap{},
+		&models.OTComplianceFinding{},
+		&models.OTTopologyEdge{},
+		&models.OTCaptureSession{},
+		&models.OTAssessmentReport{},
+		&models.OTHMIFinding{},
+		&models.OTWirelessFinding{},
 	)
 }
