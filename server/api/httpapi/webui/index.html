@@ -1404,7 +1404,7 @@ function renderPayloads() {
       '<td>' + payloadStatusBadge(p.status) + '</td>' +
       '<td class="mono" style="font-size:11px">' + fmtTime(p.created_at) + '</td>' +
       '<td style="white-space:nowrap">' +
-        (p.status === 'active' ? '<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="revokePayload(\'' + esc(p.id) + '\')">Revoke</button>' : '') +
+        (p.status === 'active' ? '<a class="btn" style="padding:3px 8px;font-size:11px;text-decoration:none;margin-right:4px" href="/api/payloads/' + esc(p.id) + '/download" target="_blank">Download</a><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="revokePayload(\'' + esc(p.id) + '\')">Revoke</button>' : '') +
       '</td>' +
     '</tr>';
   }).join('');
@@ -1419,9 +1419,10 @@ function showGeneratePayloadModal() {
     openModal(
       '<h2>Generate Payload</h2>' +
       '<div class="form-group"><label>Target OS</label><select id="gp-os"><option value="windows">Windows</option><option value="linux">Linux</option><option value="darwin">macOS (Darwin)</option></select></div>' +
-      '<div class="form-group"><label>Target Arch</label><select id="gp-arch"><option value="amd64">amd64</option><option value="arm64">arm64</option><option value="386">386</option></select></div>' +
+      '<div class="form-group"><label>Target Arch</label><select id="gp-arch"><option value="auto">Auto (amd64)</option><option value="multi">Multi-arch (all supported)</option><option value="amd64">amd64</option><option value="arm64">arm64</option><option value="386">386</option><option value="mips">mips</option><option value="riscv64">riscv64</option></select></div>' +
       '<div class="form-group"><label>Mode</label><select id="gp-mode"><option value="session">Session</option><option value="beacon">Beacon</option></select></div>' +
       '<div class="form-group"><label>Transports</label><div class="checkbox-row"><label><input type="checkbox" value="mtls" checked> mTLS</label><label><input type="checkbox" value="https"> HTTPS</label><label><input type="checkbox" value="dns"> DNS</label><label><input type="checkbox" value="wireguard"> WireGuard</label></div></div>' +
+      '<div class="form-group"><label>C2 Server (IP or DNS)</label><input type="text" id="gp-c2server" placeholder="e.g. 10.0.0.1:4444 or c2.example.com:443" value="' + window.location.hostname + ':4444"></div>' +
       '<div class="form-group"><label>Format</label><select id="gp-format"><option value="exe">EXE</option><option value="dll">DLL</option><option value="shellcode">Shellcode</option><option value="shared">Shared Library</option></select></div>' +
       '<div class="form-group"><label>Engagement</label><select id="gp-engagement">' + engOpts + '</select></div>' +
       '<div class="modal-actions">' +
@@ -1439,11 +1440,15 @@ function generatePayload() {
   });
   if (transports.length === 0) { toast('Select at least one transport', 'error'); return; }
 
+  var c2server = document.getElementById('gp-c2server').value.trim();
+  var transportStr = transports.join(',');
+  if (c2server) transportStr += '@' + c2server;
+
   var body = {
     target_os: document.getElementById('gp-os').value,
     target_arch: document.getElementById('gp-arch').value,
     mode: document.getElementById('gp-mode').value,
-    transports: transports,
+    transports: transportStr,
     format: document.getElementById('gp-format').value,
     engagement_id: document.getElementById('gp-engagement').value || undefined
   };
@@ -1451,7 +1456,8 @@ function generatePayload() {
   apiFetch('/api/payloads/generate', { method: 'POST', body: body }).then(function(d) {
     if (d.error) { toast(d.error, 'error'); return; }
     closeModal();
-    toast('Payload generated', 'success');
+    var count = Array.isArray(d) ? d.length : 1;
+    toast(count + ' payload(s) generated', 'success');
     refreshPayloads();
   }).catch(function() { toast('Failed to generate payload', 'error'); });
 }
