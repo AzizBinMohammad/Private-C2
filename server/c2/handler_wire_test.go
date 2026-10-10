@@ -3,11 +3,13 @@ package c2
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 )
 
 func TestWireRoundTrip_Message(t *testing.T) {
 	inner, _ := json.Marshal(map[string]string{"key": "value"})
-	original := Message{
+	original := protocol.Message{
 		Type: "register",
 		Data: json.RawMessage(inner),
 	}
@@ -17,7 +19,7 @@ func TestWireRoundTrip_Message(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded Message
+	var decoded protocol.Message
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -31,14 +33,14 @@ func TestWireRoundTrip_Message(t *testing.T) {
 }
 
 func TestWireRoundTrip_Message_NilData(t *testing.T) {
-	original := Message{Type: "result_ack"}
+	original := protocol.Message{Type: "result_ack"}
 
 	data, err := json.Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded Message
+	var decoded protocol.Message
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -52,7 +54,7 @@ func TestWireRoundTrip_Message_NilData(t *testing.T) {
 }
 
 func TestWireRoundTrip_RegisterData(t *testing.T) {
-	original := RegisterData{
+	original := protocol.RegisterData{
 		ImplantID: "abc123",
 		Hostname:  "target-host",
 		Username:  "admin",
@@ -68,7 +70,7 @@ func TestWireRoundTrip_RegisterData(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded RegisterData
+	var decoded protocol.RegisterData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -79,14 +81,14 @@ func TestWireRoundTrip_RegisterData(t *testing.T) {
 }
 
 func TestWireRoundTrip_RegisterData_ZeroValues(t *testing.T) {
-	original := RegisterData{}
+	original := protocol.RegisterData{}
 
 	data, err := json.Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded RegisterData
+	var decoded protocol.RegisterData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -97,7 +99,7 @@ func TestWireRoundTrip_RegisterData_ZeroValues(t *testing.T) {
 }
 
 func TestWireRoundTrip_RegisterAckData(t *testing.T) {
-	original := RegisterAckData{
+	original := protocol.RegisterAckData{
 		SessionID: "550e8400-e29b-41d4-a716-446655440000",
 		Interval:  5000,
 	}
@@ -107,7 +109,7 @@ func TestWireRoundTrip_RegisterAckData(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded RegisterAckData
+	var decoded protocol.RegisterAckData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -118,7 +120,7 @@ func TestWireRoundTrip_RegisterAckData(t *testing.T) {
 }
 
 func TestWireRoundTrip_CheckinData(t *testing.T) {
-	original := CheckinData{
+	original := protocol.CheckinData{
 		SessionID: "550e8400-e29b-41d4-a716-446655440000",
 	}
 
@@ -127,7 +129,7 @@ func TestWireRoundTrip_CheckinData(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded CheckinData
+	var decoded protocol.CheckinData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -138,8 +140,8 @@ func TestWireRoundTrip_CheckinData(t *testing.T) {
 }
 
 func TestWireRoundTrip_TaskingData_WithTasks(t *testing.T) {
-	original := TaskingData{
-		Tasks: []TaskWire{
+	original := protocol.TaskingData{
+		Tasks: []protocol.TaskWire{
 			{ID: "task-1", Type: "shell", Args: "whoami"},
 			{ID: "task-2", Type: "ls", Args: "/tmp"},
 			{ID: "task-3", Type: "cat", Args: "/etc/hostname"},
@@ -151,7 +153,7 @@ func TestWireRoundTrip_TaskingData_WithTasks(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded TaskingData
+	var decoded protocol.TaskingData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -168,14 +170,14 @@ func TestWireRoundTrip_TaskingData_WithTasks(t *testing.T) {
 }
 
 func TestWireRoundTrip_TaskingData_Empty(t *testing.T) {
-	original := TaskingData{Tasks: []TaskWire{}}
+	original := protocol.TaskingData{Tasks: []protocol.TaskWire{}}
 
 	data, err := json.Marshal(original)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded TaskingData
+	var decoded protocol.TaskingData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -186,7 +188,7 @@ func TestWireRoundTrip_TaskingData_Empty(t *testing.T) {
 }
 
 func TestWireRoundTrip_TaskWire(t *testing.T) {
-	original := TaskWire{
+	original := protocol.TaskWire{
 		ID:   "task-abc",
 		Type: "shell",
 		Args: "id && uname -a",
@@ -197,7 +199,7 @@ func TestWireRoundTrip_TaskWire(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded TaskWire
+	var decoded protocol.TaskWire
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -208,7 +210,7 @@ func TestWireRoundTrip_TaskWire(t *testing.T) {
 }
 
 func TestWireRoundTrip_ResultData(t *testing.T) {
-	original := ResultData{
+	original := protocol.ResultData{
 		SessionID: "550e8400-e29b-41d4-a716-446655440000",
 		TaskID:    "task-xyz",
 		Success:   true,
@@ -221,7 +223,7 @@ func TestWireRoundTrip_ResultData(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded ResultData
+	var decoded protocol.ResultData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -232,7 +234,7 @@ func TestWireRoundTrip_ResultData(t *testing.T) {
 }
 
 func TestWireRoundTrip_ResultData_Failure(t *testing.T) {
-	original := ResultData{
+	original := protocol.ResultData{
 		SessionID: "550e8400-e29b-41d4-a716-446655440000",
 		TaskID:    "task-fail",
 		Success:   false,
@@ -245,7 +247,7 @@ func TestWireRoundTrip_ResultData_Failure(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded ResultData
+	var decoded protocol.ResultData
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -256,7 +258,7 @@ func TestWireRoundTrip_ResultData_Failure(t *testing.T) {
 }
 
 func TestWireJSONKeys_RegisterData(t *testing.T) {
-	rd := RegisterData{
+	rd := protocol.RegisterData{
 		ImplantID: "id1",
 		Hostname:  "h",
 		Username:  "u",
@@ -285,7 +287,7 @@ func TestWireJSONKeys_RegisterData(t *testing.T) {
 }
 
 func TestWireJSONKeys_ResultData(t *testing.T) {
-	rd := ResultData{
+	rd := protocol.ResultData{
 		SessionID: "s",
 		TaskID:    "t",
 		Success:   false,
@@ -311,7 +313,7 @@ func TestWireJSONKeys_ResultData(t *testing.T) {
 }
 
 func TestWireRoundTrip_NestedMessage_RegisterData(t *testing.T) {
-	reg := RegisterData{
+	reg := protocol.RegisterData{
 		ImplantID: "nested-test",
 		Hostname:  "box1",
 		Username:  "root",
@@ -327,13 +329,13 @@ func TestWireRoundTrip_NestedMessage_RegisterData(t *testing.T) {
 		t.Fatalf("marshal register data: %v", err)
 	}
 
-	msg := Message{Type: "register", Data: json.RawMessage(regBytes)}
+	msg := protocol.Message{Type: "register", Data: json.RawMessage(regBytes)}
 	wireBytes, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("marshal message: %v", err)
 	}
 
-	var decodedMsg Message
+	var decodedMsg protocol.Message
 	if err := json.Unmarshal(wireBytes, &decodedMsg); err != nil {
 		t.Fatalf("unmarshal message: %v", err)
 	}
@@ -342,7 +344,7 @@ func TestWireRoundTrip_NestedMessage_RegisterData(t *testing.T) {
 		t.Errorf("message type = %q, want %q", decodedMsg.Type, "register")
 	}
 
-	var decodedReg RegisterData
+	var decodedReg protocol.RegisterData
 	if err := json.Unmarshal(decodedMsg.Data, &decodedReg); err != nil {
 		t.Fatalf("unmarshal register data from message: %v", err)
 	}
@@ -353,25 +355,25 @@ func TestWireRoundTrip_NestedMessage_RegisterData(t *testing.T) {
 }
 
 func TestWireRoundTrip_NestedMessage_TaskingData(t *testing.T) {
-	tasking := TaskingData{
-		Tasks: []TaskWire{
+	tasking := protocol.TaskingData{
+		Tasks: []protocol.TaskWire{
 			{ID: "t1", Type: "shell", Args: "whoami"},
 		},
 	}
 
 	taskingBytes, _ := json.Marshal(tasking)
-	msg := Message{Type: "tasking", Data: json.RawMessage(taskingBytes)}
+	msg := protocol.Message{Type: "tasking", Data: json.RawMessage(taskingBytes)}
 	wireBytes, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decodedMsg Message
+	var decodedMsg protocol.Message
 	if err := json.Unmarshal(wireBytes, &decodedMsg); err != nil {
 		t.Fatalf("unmarshal message: %v", err)
 	}
 
-	var decodedTasking TaskingData
+	var decodedTasking protocol.TaskingData
 	if err := json.Unmarshal(decodedMsg.Data, &decodedTasking); err != nil {
 		t.Fatalf("unmarshal tasking: %v", err)
 	}
@@ -385,7 +387,7 @@ func TestWireRoundTrip_NestedMessage_TaskingData(t *testing.T) {
 }
 
 func TestWireRoundTrip_NestedMessage_ResultData(t *testing.T) {
-	result := ResultData{
+	result := protocol.ResultData{
 		SessionID: "sess-1",
 		TaskID:    "task-1",
 		Success:   true,
@@ -394,18 +396,18 @@ func TestWireRoundTrip_NestedMessage_ResultData(t *testing.T) {
 	}
 
 	resultBytes, _ := json.Marshal(result)
-	msg := Message{Type: "result", Data: json.RawMessage(resultBytes)}
+	msg := protocol.Message{Type: "result", Data: json.RawMessage(resultBytes)}
 	wireBytes, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decodedMsg Message
+	var decodedMsg protocol.Message
 	if err := json.Unmarshal(wireBytes, &decodedMsg); err != nil {
 		t.Fatalf("unmarshal message: %v", err)
 	}
 
-	var decodedResult ResultData
+	var decodedResult protocol.ResultData
 	if err := json.Unmarshal(decodedMsg.Data, &decodedResult); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}

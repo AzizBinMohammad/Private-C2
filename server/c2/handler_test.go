@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
+	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 )
 
 // sendMsg writes a framed JSON message to conn.
@@ -18,7 +19,7 @@ func sendMsg(t *testing.T, conn net.Conn, msgType string, data interface{}) {
 	if err != nil {
 		t.Fatalf("marshal data: %v", err)
 	}
-	msg := Message{Type: msgType, Data: json.RawMessage(dataBytes)}
+	msg := protocol.Message{Type: msgType, Data: json.RawMessage(dataBytes)}
 	frame, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("marshal message: %v", err)
@@ -29,21 +30,21 @@ func sendMsg(t *testing.T, conn net.Conn, msgType string, data interface{}) {
 }
 
 // recvMsg reads a framed JSON message from conn.
-func recvMsg(t *testing.T, conn net.Conn) Message {
+func recvMsg(t *testing.T, conn net.Conn) protocol.Message {
 	t.Helper()
 	frame, err := envelope.ReadFrame(conn)
 	if err != nil {
 		t.Fatalf("read frame: %v", err)
 	}
-	var msg Message
+	var msg protocol.Message
 	if err := json.Unmarshal(frame, &msg); err != nil {
 		t.Fatalf("unmarshal message: %v", err)
 	}
 	return msg
 }
 
-func makeRegisterData() RegisterData {
-	return RegisterData{
+func makeRegisterData() protocol.RegisterData {
+	return protocol.RegisterData{
 		ImplantID: "implant-001",
 		Hostname:  "target-host",
 		Username:  "testuser",
@@ -64,7 +65,7 @@ func register(t *testing.T, conn net.Conn) string {
 	if ack.Type != "register_ack" {
 		t.Fatalf("expected register_ack, got %q", ack.Type)
 	}
-	var ackData RegisterAckData
+	var ackData protocol.RegisterAckData
 	if err := json.Unmarshal(ack.Data, &ackData); err != nil {
 		t.Fatalf("unmarshal ack data: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestRegistration_AckContainsValidUUID(t *testing.T) {
 	sendMsg(t, clientConn, "register", makeRegisterData())
 	ack := recvMsg(t, clientConn)
 
-	var ackData RegisterAckData
+	var ackData protocol.RegisterAckData
 	if err := json.Unmarshal(ack.Data, &ackData); err != nil {
 		t.Fatalf("unmarshal ack: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestCheckin_UpdatesLastCheckin(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	sendMsg(t, clientConn, "checkin", CheckinData{SessionID: sessionID})
+	sendMsg(t, clientConn, "checkin", protocol.CheckinData{SessionID: sessionID})
 	_ = recvMsg(t, clientConn) // consume tasking response
 
 	sess = srv.GetSession(sessionID)
@@ -170,14 +171,14 @@ func TestCheckin_EmptyTaskQueue(t *testing.T) {
 
 	sessionID := register(t, clientConn)
 
-	sendMsg(t, clientConn, "checkin", CheckinData{SessionID: sessionID})
+	sendMsg(t, clientConn, "checkin", protocol.CheckinData{SessionID: sessionID})
 	resp := recvMsg(t, clientConn)
 
 	if resp.Type != "tasking" {
 		t.Fatalf("expected tasking, got %q", resp.Type)
 	}
 
-	var tasking TaskingData
+	var tasking protocol.TaskingData
 	if err := json.Unmarshal(resp.Data, &tasking); err != nil {
 		t.Fatalf("unmarshal tasking: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestRegistration_WrongMessageType(t *testing.T) {
 		close(done)
 	}()
 
-	sendMsg(t, clientConn, "checkin", CheckinData{SessionID: "bogus"})
+	sendMsg(t, clientConn, "checkin", protocol.CheckinData{SessionID: "bogus"})
 
 	<-done
 
@@ -241,7 +242,7 @@ func TestRegistration_InvalidRegisterData(t *testing.T) {
 
 	// Send a register message with data that can't unmarshal to RegisterData.
 	dataBytes, _ := json.Marshal("a plain string, not an object")
-	msg := Message{Type: "register", Data: json.RawMessage(dataBytes)}
+	msg := protocol.Message{Type: "register", Data: json.RawMessage(dataBytes)}
 	frame, _ := json.Marshal(msg)
 	if err := envelope.WriteFrame(clientConn, frame); err != nil {
 		t.Fatalf("write frame: %v", err)
@@ -326,14 +327,14 @@ func TestQueueTask_DispatchOnCheckin(t *testing.T) {
 		t.Fatalf("QueueTask: %v", err)
 	}
 
-	sendMsg(t, clientConn, "checkin", CheckinData{SessionID: sessionID})
+	sendMsg(t, clientConn, "checkin", protocol.CheckinData{SessionID: sessionID})
 	resp := recvMsg(t, clientConn)
 
 	if resp.Type != "tasking" {
 		t.Fatalf("expected tasking, got %q", resp.Type)
 	}
 
-	var tasking TaskingData
+	var tasking protocol.TaskingData
 	if err := json.Unmarshal(resp.Data, &tasking); err != nil {
 		t.Fatalf("unmarshal tasking: %v", err)
 	}
@@ -351,9 +352,9 @@ func TestQueueTask_DispatchOnCheckin(t *testing.T) {
 	}
 
 	// Second checkin should return empty.
-	sendMsg(t, clientConn, "checkin", CheckinData{SessionID: sessionID})
+	sendMsg(t, clientConn, "checkin", protocol.CheckinData{SessionID: sessionID})
 	resp2 := recvMsg(t, clientConn)
-	var tasking2 TaskingData
+	var tasking2 protocol.TaskingData
 	if err := json.Unmarshal(resp2.Data, &tasking2); err != nil {
 		t.Fatalf("unmarshal tasking2: %v", err)
 	}
@@ -380,10 +381,10 @@ func TestMultipleTasksDispatchedInOneBatch(t *testing.T) {
 		}
 	}
 
-	sendMsg(t, clientConn, "checkin", CheckinData{SessionID: sessionID})
+	sendMsg(t, clientConn, "checkin", protocol.CheckinData{SessionID: sessionID})
 	resp := recvMsg(t, clientConn)
 
-	var tasking TaskingData
+	var tasking protocol.TaskingData
 	if err := json.Unmarshal(resp.Data, &tasking); err != nil {
 		t.Fatalf("unmarshal tasking: %v", err)
 	}
@@ -406,11 +407,11 @@ func TestHandleResult_StoresResult(t *testing.T) {
 	taskID, _ := srv.QueueTask(sessionID, "shell", "whoami")
 
 	// Drain the task via checkin.
-	sendMsg(t, clientConn, "checkin", CheckinData{SessionID: sessionID})
+	sendMsg(t, clientConn, "checkin", protocol.CheckinData{SessionID: sessionID})
 	_ = recvMsg(t, clientConn) // consume tasking
 
 	// Send result.
-	sendMsg(t, clientConn, "result", ResultData{
+	sendMsg(t, clientConn, "result", protocol.ResultData{
 		SessionID: sessionID,
 		TaskID:    taskID,
 		Success:   true,
@@ -485,9 +486,9 @@ func TestConcurrentQueueTask(t *testing.T) {
 	}
 
 	// Drain and verify count.
-	sendMsg(t, clientConn, "checkin", CheckinData{SessionID: sessionID})
+	sendMsg(t, clientConn, "checkin", protocol.CheckinData{SessionID: sessionID})
 	resp := recvMsg(t, clientConn)
-	var tasking TaskingData
+	var tasking protocol.TaskingData
 	if err := json.Unmarshal(resp.Data, &tasking); err != nil {
 		t.Fatalf("unmarshal tasking: %v", err)
 	}

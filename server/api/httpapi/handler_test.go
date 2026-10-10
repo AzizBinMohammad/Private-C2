@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
+	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
@@ -75,7 +76,7 @@ func registerImplant(t *testing.T, srv *c2.ImplantServer) (string, func()) {
 	}()
 
 	// Send register.
-	regData, _ := json.Marshal(c2.RegisterData{
+	regData, _ := json.Marshal(protocol.RegisterData{
 		ImplantID: "test-implant",
 		Hostname:  "test-host",
 		Username:  "testuser",
@@ -85,7 +86,7 @@ func registerImplant(t *testing.T, srv *c2.ImplantServer) (string, func()) {
 		Process:   "test",
 		Mode:      "beacon",
 	})
-	msg := c2.Message{Type: "register", Data: json.RawMessage(regData)}
+	msg := protocol.Message{Type: "register", Data: json.RawMessage(regData)}
 	frame, _ := json.Marshal(msg)
 	if err := envelope.WriteFrame(clientConn, frame); err != nil {
 		t.Fatalf("write register: %v", err)
@@ -96,9 +97,9 @@ func registerImplant(t *testing.T, srv *c2.ImplantServer) (string, func()) {
 	if err != nil {
 		t.Fatalf("read ack: %v", err)
 	}
-	var ackMsg c2.Message
+	var ackMsg protocol.Message
 	json.Unmarshal(ackFrame, &ackMsg)
-	var ack c2.RegisterAckData
+	var ack protocol.RegisterAckData
 	json.Unmarshal(ackMsg.Data, &ack)
 
 	cleanup := func() {

