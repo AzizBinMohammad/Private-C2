@@ -90,3 +90,11 @@ store.Migrate(db) // fails
   modules/ot/hmi.go, modules/ot/segmentation.go, modules/ot/serial.go,
   modules/ot/wireless.go. Pre-existing, unrelated to the protocol refactor.
   Fix with net.JoinHostPort(host, port).
+
+- Test suite timeout: `make test` (or CI) using `-race` with a 2-minute
+  timeout is too tight now that server/api/httpapi/handler_test.go has grown
+  (bcrypt login is slow under race instrumentation, multiplied across many
+  tests). Confirmed tests pass correctly with -race given a 5-minute timeout
+  (165.9s). Fix: raise the timeout in the test command/CI config to at least
+  3-5 minutes, or share a single pre-hashed test user across tests instead of
+  calling the real login/bcrypt path each time.
