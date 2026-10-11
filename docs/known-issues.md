@@ -81,3 +81,4 @@ store.Migrate(db) // fails
 ```
 
 **Workaround:** Use a temp file path instead of `:memory:` for test databases.
+- go vet warnings: several files use fmt.Sprintf("%s:%d", ...) for addresses, which breaks with IPv6 (net.Dial). Files: modules/ot/protocols/coap.go, modules/ot/protocols/common.go, modules/network/network.go, modules/ot/discovery.go, modules/ot/fingerprint.go, modules/ot/historian.go, modules/ot/hmi.go, modules/ot/segmentation.go, modules/ot/serial.go, modules/ot/wireless.go. Pre-existing, unrelated to refactor. Fix with net.JoinHostPort.
