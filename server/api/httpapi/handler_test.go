@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -14,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 	"github.com/azizbinmohammad/private-c2/server/c2"
@@ -693,8 +692,6 @@ func TestHTTP_AuditVerify_SingleEntry(t *testing.T) {
 	}
 }
 
-// insertAuditChain inserts n audit entries using the handler.go hash algorithm
-// (sha256(id + created_at_RFC3339Nano + action + previous_hash)).
 func insertAuditChain(t *testing.T, db *gorm.DB, n int) {
 	t.Helper()
 	prevHash := ""
@@ -704,19 +701,16 @@ func insertAuditChain(t *testing.T, db *gorm.DB, n int) {
 		id := fmt.Sprintf("audit-%03d", i)
 		createdAt := base.Add(time.Duration(i) * time.Minute)
 		action := fmt.Sprintf("action-%d", i)
+		operatorID := "test-op"
+		eventType := "test"
 
-		h := sha256.New()
-		h.Write([]byte(id))
-		h.Write([]byte(createdAt.Format(time.RFC3339Nano)))
-		h.Write([]byte(action))
-		h.Write([]byte(prevHash))
-		entryHash := hex.EncodeToString(h.Sum(nil))
+		entryHash := audit.ComputeHash(id, createdAt, operatorID, audit.EventType(eventType), action, prevHash)
 
 		entry := models.AuditEntry{
 			ID:           id,
 			CreatedAt:    createdAt,
-			OperatorID:   "test-op",
-			EventType:    "test",
+			OperatorID:   operatorID,
+			EventType:    eventType,
 			Action:       action,
 			PreviousHash: prevHash,
 			EntryHash:    entryHash,

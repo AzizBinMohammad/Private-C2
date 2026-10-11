@@ -93,7 +93,7 @@ func (l *Logger) Log(operatorID, engagementID, sessionID string, eventType Event
 	return nil
 }
 
-func computeHash(entry Entry) string {
+func ComputeHash(id string, timestamp time.Time, operatorID string, eventType EventType, action, previousHash string) string {
 	data, _ := json.Marshal(struct {
 		ID           string    `json:"id"`
 		Timestamp    time.Time `json:"timestamp"`
@@ -102,13 +102,17 @@ func computeHash(entry Entry) string {
 		Action       string    `json:"action"`
 		PreviousHash string    `json:"previous_hash"`
 	}{
-		ID:           entry.ID,
-		Timestamp:    entry.Timestamp,
-		OperatorID:   entry.OperatorID,
-		EventType:    entry.EventType,
-		Action:       entry.Action,
-		PreviousHash: entry.PreviousHash,
+		ID:           id,
+		Timestamp:    timestamp,
+		OperatorID:   operatorID,
+		EventType:    eventType,
+		Action:       action,
+		PreviousHash: previousHash,
 	})
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
+}
+
+func computeHash(entry Entry) string {
+	return ComputeHash(entry.ID, entry.Timestamp, entry.OperatorID, entry.EventType, entry.Action, entry.PreviousHash)
 }

@@ -1,14 +1,12 @@
 package httpapi
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"gorm.io/gorm"
 )
@@ -103,13 +101,7 @@ func (ah *auditHandler) handleAuditDetail(w http.ResponseWriter, r *http.Request
 				brokenAt = i
 				break
 			}
-			// Recompute hash: sha256(id + created_at + action + previous_hash)
-			h := sha256.New()
-			h.Write([]byte(entry.ID))
-			h.Write([]byte(entry.CreatedAt.Format(time.RFC3339Nano)))
-			h.Write([]byte(entry.Action))
-			h.Write([]byte(entry.PreviousHash))
-			prevHash = hex.EncodeToString(h.Sum(nil))
+			prevHash = audit.ComputeHash(entry.ID, entry.CreatedAt, entry.OperatorID, audit.EventType(entry.EventType), entry.Action, entry.PreviousHash)
 			if entry.EntryHash != prevHash {
 				valid = false
 				brokenAt = i

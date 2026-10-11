@@ -1,26 +1,12 @@
 package audit
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"testing"
 	"time"
 )
 
-// apiComputeHash reproduces the hash algorithm used by the API verification
-// endpoint in server/api/httpapi/audit.go (handleAuditDetail). It concatenates
-// 4 raw byte fields: id + created_at (RFC3339Nano) + action + previous_hash.
-func apiComputeHash(id string, createdAt time.Time, action, previousHash string) string {
-	h := sha256.New()
-	h.Write([]byte(id))
-	h.Write([]byte(createdAt.Format(time.RFC3339Nano)))
-	h.Write([]byte(action))
-	h.Write([]byte(previousHash))
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-func TestHashAlgorithm_LibraryAndAPI_CurrentlyDiffer(t *testing.T) {
+func TestHashAlgorithm_LibraryAndAPI_Match(t *testing.T) {
 	ts := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
 	entry := Entry{
@@ -32,88 +18,74 @@ func TestHashAlgorithm_LibraryAndAPI_CurrentlyDiffer(t *testing.T) {
 		PreviousHash: "",
 	}
 
-	libraryHash := computeHash(entry)
-	apiHash := apiComputeHash(entry.ID, entry.Timestamp, entry.Action, entry.PreviousHash)
+	internalHash := computeHash(entry)
+	exportedHash := ComputeHash(entry.ID, entry.Timestamp, entry.OperatorID, entry.EventType, entry.Action, entry.PreviousHash)
 
-	if libraryHash == apiHash {
-		t.Fatal("expected library and API hashes to differ (documenting known issue #2), but they matched")
+	if internalHash != exportedHash {
+		t.Fatalf("internal computeHash and exported ComputeHash must produce identical results\n  internal: %s\n  exported: %s", internalHash, exportedHash)
 	}
-
-	t.Logf("library hash: %s", libraryHash)
-	t.Logf("API hash:     %s", apiHash)
-	t.Log("confirmed: the two algorithms produce different hashes for the same entry fields")
 }
 
-func TestHashAlgorithm_DifferenceSources(t *testing.T) {
+func TestHashAlgorithm_FieldSensitivity(t *testing.T) {
 	ts := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	t.Run("differs_due_to_extra_fields", func(t *testing.T) {
-		entry := Entry{
-			ID:           "entry-1",
-			Timestamp:    ts,
-			OperatorID:   "",
-			EventType:    "",
-			Action:       "action",
-			PreviousHash: "",
-		}
-
-		libraryHash := computeHash(entry)
-		apiHash := apiComputeHash(entry.ID, entry.Timestamp, entry.Action, entry.PreviousHash)
-
-		if libraryHash == apiHash {
-			t.Fatal("even with empty operator_id and event_type, hashes differ due to JSON vs concatenation")
+	t.Run("changes_with_operator_id", func(t *testing.T) {
+		h1 := ComputeHash("id", ts, "op1", EventSessionInteract, "action", "")
+		h2 := ComputeHash("id", ts, "op2", EventSessionInteract, "action", "")
+		if h1 == h2 {
+			t.Fatal("hash must change when operator_id changes")
 		}
 	})
 
-	t.Run("library_includes_operator_id_and_event_type", func(t *testing.T) {
-		base := Entry{
-			ID:           "entry-1",
-			Timestamp:    ts,
-			OperatorID:   "op1",
-			EventType:    EventSessionInteract,
-			Action:       "action",
-			PreviousHash: "",
-		}
-
-		modified := base
-		modified.OperatorID = "op2"
-
-		hash1 := computeHash(base)
-		hash2 := computeHash(modified)
-
-		if hash1 == hash2 {
-			t.Fatal("library hash should change when operator_id changes")
-		}
-
-		apiHash1 := apiComputeHash(base.ID, base.Timestamp, base.Action, base.PreviousHash)
-		apiHash2 := apiComputeHash(modified.ID, modified.Timestamp, modified.Action, modified.PreviousHash)
-
-		if apiHash1 != apiHash2 {
-			t.Fatal("API hash should NOT change when operator_id changes (it doesn't include that field)")
+	t.Run("changes_with_event_type", func(t *testing.T) {
+		h1 := ComputeHash("id", ts, "op1", EventSessionInteract, "action", "")
+		h2 := ComputeHash("id", ts, "op1", EventOperatorLogin, "action", "")
+		if h1 == h2 {
+			t.Fatal("hash must change when event_type changes")
 		}
 	})
 
-	t.Run("chain_with_both_algorithms_diverges", func(t *testing.T) {
-		prevLib := ""
-		prevAPI := ""
+	t.Run("changes_with_action", func(t *testing.T) {
+		h1 := ComputeHash("id", ts, "op1", EventSessionInteract, "action-a", "")
+		h2 := ComputeHash("id", ts, "op1", EventSessionInteract, "action-b", "")
+		if h1 == h2 {
+			t.Fatal("hash must change when action changes")
+		}
+	})
 
+	t.Run("changes_with_previous_hash", func(t *testing.T) {
+		h1 := ComputeHash("id", ts, "op1", EventSessionInteract, "action", "")
+		h2 := ComputeHash("id", ts, "op1", EventSessionInteract, "action", "abc123")
+		if h1 == h2 {
+			t.Fatal("hash must change when previous_hash changes")
+		}
+	})
+
+	t.Run("chain_integrity", func(t *testing.T) {
+		prev := ""
+		hashes := make([]string, 3)
 		for i := 0; i < 3; i++ {
-			entry := Entry{
-				ID:           fmt.Sprintf("entry-%d", i),
-				Timestamp:    ts.Add(time.Duration(i) * time.Minute),
-				OperatorID:   "op1",
-				EventType:    EventSessionInteract,
-				Action:       fmt.Sprintf("action-%d", i),
-				PreviousHash: prevLib,
-			}
-			prevLib = computeHash(entry)
-
-			entry.PreviousHash = prevAPI
-			prevAPI = apiComputeHash(entry.ID, entry.Timestamp, entry.Action, entry.PreviousHash)
+			h := ComputeHash(
+				fmt.Sprintf("entry-%d", i),
+				ts.Add(time.Duration(i)*time.Minute),
+				"op1",
+				EventSessionInteract,
+				fmt.Sprintf("action-%d", i),
+				prev,
+			)
+			hashes[i] = h
+			prev = h
 		}
 
-		if prevLib == prevAPI {
-			t.Fatal("hash chains built with the two algorithms should diverge")
+		for i, h := range hashes {
+			if h == "" {
+				t.Fatalf("hash %d is empty", i)
+			}
+			for j := i + 1; j < len(hashes); j++ {
+				if h == hashes[j] {
+					t.Fatalf("hash %d and %d collide: %s", i, j, h)
+				}
+			}
 		}
 	})
 }
