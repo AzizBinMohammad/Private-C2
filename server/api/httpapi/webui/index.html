@@ -1374,6 +1374,35 @@ function doScopeCheck(engId) {
 // ══════════════════════════════════════════
 // PAYLOADS
 // ══════════════════════════════════════════
+var formatsByOS = {
+  windows: [
+    {value: 'exe', label: 'EXE'},
+    {value: 'dll', label: 'DLL'},
+    {value: 'shellcode', label: 'Shellcode'},
+    {value: 'shared', label: 'Shared Library (.dll)'},
+    {value: 'ps1', label: 'PowerShell Script (.ps1)'}
+  ],
+  linux: [
+    {value: 'exe', label: 'ELF Binary'},
+    {value: 'shellcode', label: 'Shellcode'},
+    {value: 'shared', label: 'Shared Library (.so)'},
+    {value: 'sh', label: 'Shell Script (.sh)'}
+  ],
+  darwin: [
+    {value: 'exe', label: 'Mach-O Binary'},
+    {value: 'shellcode', label: 'Shellcode'},
+    {value: 'shared', label: 'Shared Library (.dylib)'},
+    {value: 'sh', label: 'Shell Script (.sh)'}
+  ]
+};
+function updateFormatOptions() {
+  var os = document.getElementById('gp-os').value;
+  var sel = document.getElementById('gp-format');
+  var fmts = formatsByOS[os] || [{value: 'exe', label: 'EXE'}];
+  sel.innerHTML = fmts.map(function(f) {
+    return '<option value="' + f.value + '">' + esc(f.label) + '</option>';
+  }).join('');
+}
 function refreshPayloads() {
   apiFetch('/api/payloads').then(function(data) {
     if (Array.isArray(data)) {
@@ -1418,18 +1447,19 @@ function showGeneratePayloadModal() {
 
     openModal(
       '<h2>Generate Payload</h2>' +
-      '<div class="form-group"><label>Target OS</label><select id="gp-os"><option value="windows">Windows</option><option value="linux">Linux</option><option value="darwin">macOS (Darwin)</option></select></div>' +
+      '<div class="form-group"><label>Target OS</label><select id="gp-os" onchange="updateFormatOptions()"><option value="windows">Windows</option><option value="linux">Linux</option><option value="darwin">macOS (Darwin)</option></select></div>' +
       '<div class="form-group"><label>Target Arch</label><select id="gp-arch"><option value="auto">Auto (amd64)</option><option value="multi">Multi-arch (all supported)</option><option value="amd64">amd64</option><option value="arm64">arm64</option><option value="386">386</option><option value="mips">mips</option><option value="riscv64">riscv64</option></select></div>' +
       '<div class="form-group"><label>Mode</label><select id="gp-mode"><option value="session">Session</option><option value="beacon">Beacon</option></select></div>' +
       '<div class="form-group"><label>Transports</label><div class="checkbox-row"><label><input type="checkbox" value="mtls" checked> mTLS</label><label><input type="checkbox" value="https"> HTTPS</label><label><input type="checkbox" value="dns"> DNS</label><label><input type="checkbox" value="wireguard"> WireGuard</label></div></div>' +
       '<div class="form-group"><label>C2 Server (IP or DNS)</label><input type="text" id="gp-c2server" placeholder="e.g. 10.0.0.1:4444 or c2.example.com:443" value="' + window.location.hostname + ':4444"></div>' +
-      '<div class="form-group"><label>Format</label><select id="gp-format"><option value="exe">EXE</option><option value="dll">DLL</option><option value="shellcode">Shellcode</option><option value="shared">Shared Library</option></select></div>' +
+      '<div class="form-group"><label>Format</label><select id="gp-format"></select></div>' +
       '<div class="form-group"><label>Engagement</label><select id="gp-engagement">' + engOpts + '</select></div>' +
       '<div class="modal-actions">' +
         '<button class="btn" onclick="closeModal()">Cancel</button>' +
         '<button class="btn primary" onclick="generatePayload()">Generate</button>' +
       '</div>'
     );
+    updateFormatOptions();
   });
 }
 

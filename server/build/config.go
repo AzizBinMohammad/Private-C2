@@ -44,9 +44,9 @@ func (c *BuildConfig) Validate() error {
 		c.OutputFormat = "exe"
 	}
 
-	validFormats := map[string]bool{"exe": true, "dll": true, "shellcode": true, "shared": true}
+	validFormats := map[string]bool{"exe": true, "dll": true, "shellcode": true, "shared": true, "ps1": true, "sh": true}
 	if !validFormats[c.OutputFormat] {
-		return fmt.Errorf("unsupported output format %q: must be exe, dll, shellcode, or shared", c.OutputFormat)
+		return fmt.Errorf("unsupported output format %q: must be exe, dll, shellcode, shared, ps1, or sh", c.OutputFormat)
 	}
 
 	if c.Jitter < 0 || c.Jitter > 1.0 {

