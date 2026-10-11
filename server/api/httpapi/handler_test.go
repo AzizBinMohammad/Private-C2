@@ -730,3 +730,1261 @@ func TestHTTP_GetSession_NotFound(t *testing.T) {
 		t.Errorf("expected 404, got %d", w.Code)
 	}
 }
+
+// ── Beacon Endpoints ──
+
+func TestHTTP_ListBeacons_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/beacons", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var beacons []models.Beacon
+	if err := json.NewDecoder(w.Body).Decode(&beacons); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(beacons) != 0 {
+		t.Errorf("expected 0 beacons, got %d", len(beacons))
+	}
+}
+
+func TestHTTP_ListBeacons_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.Beacon{Hostname: "plc-01", OS: "linux", Arch: "amd64"})
+	db.Create(&models.Beacon{Hostname: "hmi-02", OS: "windows", Arch: "amd64"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/beacons", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var beacons []models.Beacon
+	json.NewDecoder(w.Body).Decode(&beacons)
+	if len(beacons) != 2 {
+		t.Errorf("expected 2 beacons, got %d", len(beacons))
+	}
+}
+
+func TestHTTP_ListBeacons_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/beacons", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_ListBeacons_NoAuth(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/beacons", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// ── Listener Endpoints ──
+
+func TestHTTP_ListListeners_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/listeners", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var listeners []models.Listener
+	json.NewDecoder(w.Body).Decode(&listeners)
+	if len(listeners) != 0 {
+		t.Errorf("expected 0 listeners, got %d", len(listeners))
+	}
+}
+
+func TestHTTP_CreateListener_Success(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"type":"https","bind_addr":"0.0.0.0","port":4444}`
+	req := httptest.NewRequest(http.MethodPost, "/api/listeners", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var listener models.Listener
+	json.NewDecoder(w.Body).Decode(&listener)
+	if listener.ID == "" {
+		t.Error("listener ID should be set")
+	}
+	if listener.Status != "running" {
+		t.Errorf("status = %q, want %q", listener.Status, "running")
+	}
+	if listener.Type != "https" {
+		t.Errorf("type = %q, want %q", listener.Type, "https")
+	}
+}
+
+func TestHTTP_CreateListener_MissingFields(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	for _, body := range []string{
+		`{"type":"","bind_addr":"0.0.0.0","port":4444}`,
+		`{"type":"https","bind_addr":"","port":4444}`,
+		`{"type":"https","bind_addr":"0.0.0.0","port":0}`,
+		`{"type":"https","bind_addr":"0.0.0.0"}`,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/listeners", bytes.NewBufferString(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("body=%s: expected 400, got %d", body, w.Code)
+		}
+	}
+}
+
+func TestHTTP_CreateListener_InvalidJSON(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/listeners", bytes.NewBufferString(`{invalid`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHTTP_CreateThenListListeners(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"type":"dns","bind_addr":"0.0.0.0","port":5353}`
+	req := httptest.NewRequest(http.MethodPost, "/api/listeners", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/listeners", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var listeners []models.Listener
+	json.NewDecoder(w.Body).Decode(&listeners)
+	if len(listeners) != 1 {
+		t.Fatalf("expected 1 listener, got %d", len(listeners))
+	}
+	if listeners[0].Type != "dns" {
+		t.Errorf("type = %q, want %q", listeners[0].Type, "dns")
+	}
+}
+
+func TestHTTP_DeleteListener_Success(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	l := models.Listener{Type: "https", BindAddr: "0.0.0.0", Port: 4444, Status: "running"}
+	db.Create(&l)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/listeners/"+l.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify it's gone.
+	req = httptest.NewRequest(http.MethodGet, "/api/listeners", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	var remaining []models.Listener
+	json.NewDecoder(w.Body).Decode(&remaining)
+	if len(remaining) != 0 {
+		t.Errorf("expected 0 listeners after delete, got %d", len(remaining))
+	}
+}
+
+func TestHTTP_DeleteListener_NotFound(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/listeners/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_DeleteListener_MethodNotAllowed(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	l := models.Listener{Type: "https", BindAddr: "0.0.0.0", Port: 4444, Status: "running"}
+	db.Create(&l)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/listeners/"+l.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_ListProfiles_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/listeners/profiles", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var profiles []models.C2Profile
+	json.NewDecoder(w.Body).Decode(&profiles)
+	if len(profiles) != 0 {
+		t.Errorf("expected 0 profiles, got %d", len(profiles))
+	}
+}
+
+func TestHTTP_ListProfiles_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.C2Profile{Name: "default", Config: `{"jitter":0.2}`, Version: 1})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/listeners/profiles", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var profiles []models.C2Profile
+	json.NewDecoder(w.Body).Decode(&profiles)
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(profiles))
+	}
+	if profiles[0].Name != "default" {
+		t.Errorf("name = %q, want %q", profiles[0].Name, "default")
+	}
+}
+
+func TestHTTP_ListProfiles_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/listeners/profiles", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+// ── Engagement Endpoints ──
+
+func TestHTTP_ListEngagements_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/engagements", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var engagements []models.Engagement
+	json.NewDecoder(w.Body).Decode(&engagements)
+	if len(engagements) != 0 {
+		t.Errorf("expected 0 engagements, got %d", len(engagements))
+	}
+}
+
+func TestHTTP_CreateEngagement_Success(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"name":"Red Team Q4","description":"Quarterly assessment","scope_config":"{\"cidrs\":[\"10.0.0.0/8\"]}"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var eng models.Engagement
+	json.NewDecoder(w.Body).Decode(&eng)
+	if eng.ID == "" {
+		t.Error("engagement ID should be set")
+	}
+	if eng.Name != "Red Team Q4" {
+		t.Errorf("name = %q, want %q", eng.Name, "Red Team Q4")
+	}
+}
+
+func TestHTTP_CreateEngagement_MissingName(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"description":"no name given"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHTTP_CreateEngagement_InvalidJSON(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements", bytes.NewBufferString(`not json`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHTTP_GetEngagement_Success(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{Name: "Pentest Alpha", Description: "Initial access assessment"}
+	db.Create(&eng)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/engagements/"+eng.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got models.Engagement
+	json.NewDecoder(w.Body).Decode(&got)
+	if got.Name != "Pentest Alpha" {
+		t.Errorf("name = %q, want %q", got.Name, "Pentest Alpha")
+	}
+}
+
+func TestHTTP_GetEngagement_NotFound(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/engagements/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_UpdateEngagement_Success(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{Name: "Original Name", Description: "Original desc"}
+	db.Create(&eng)
+
+	body := `{"description":"Updated description"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/engagements/"+eng.ID, bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated models.Engagement
+	json.NewDecoder(w.Body).Decode(&updated)
+	if updated.Description != "Updated description" {
+		t.Errorf("description = %q, want %q", updated.Description, "Updated description")
+	}
+	if updated.Name != "Original Name" {
+		t.Errorf("name should remain %q, got %q", "Original Name", updated.Name)
+	}
+}
+
+func TestHTTP_UpdateEngagement_NotFound(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"description":"nope"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/engagements/nonexistent", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_UpdateEngagement_InvalidJSON(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{Name: "Test Eng"}
+	db.Create(&eng)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/engagements/"+eng.ID, bytes.NewBufferString(`{bad`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHTTP_KillswitchEngagement_Success(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{Name: "Active Engagement", Status: "active"}
+	db.Create(&eng)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/killswitch", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]string
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["status"] != "killed" {
+		t.Errorf("status = %q, want %q", result["status"], "killed")
+	}
+
+	// Verify the DB was updated.
+	var reloaded models.Engagement
+	db.First(&reloaded, "id = ?", eng.ID)
+	if reloaded.Status != "killed" {
+		t.Errorf("db status = %q, want %q", reloaded.Status, "killed")
+	}
+}
+
+func TestHTTP_KillswitchEngagement_NotFound(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/nonexistent/killswitch", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_KillswitchEngagement_MethodNotAllowed(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{Name: "Test", Status: "active"}
+	db.Create(&eng)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/engagements/"+eng.ID+"/killswitch", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_EngagementSubpath_NotFound(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{Name: "Test"}
+	db.Create(&eng)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/engagements/"+eng.ID+"/bogus", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_Engagements_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/engagements", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_Engagements_NoAuth(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/engagements", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestHTTP_CreateThenGetEngagement(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"name":"Full Flow Engagement","scope_config":"{\"cidrs\":[\"192.168.0.0/16\"]}"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", w.Code)
+	}
+	var created models.Engagement
+	json.NewDecoder(w.Body).Decode(&created)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/engagements/"+created.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("get: expected 200, got %d", w.Code)
+	}
+	var fetched models.Engagement
+	json.NewDecoder(w.Body).Decode(&fetched)
+	if fetched.Name != "Full Flow Engagement" {
+		t.Errorf("name = %q, want %q", fetched.Name, "Full Flow Engagement")
+	}
+}
+
+// ── Payload Endpoints ──
+
+func TestHTTP_ListPayloads_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var payloads []models.PayloadArtifact
+	json.NewDecoder(w.Body).Decode(&payloads)
+	if len(payloads) != 0 {
+		t.Errorf("expected 0 payloads, got %d", len(payloads))
+	}
+}
+
+func TestHTTP_ListPayloads_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.PayloadArtifact{TargetOS: "linux", TargetArch: "amd64", SHA256: "aaa"})
+	db.Create(&models.PayloadArtifact{TargetOS: "windows", TargetArch: "amd64", SHA256: "bbb"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var payloads []models.PayloadArtifact
+	json.NewDecoder(w.Body).Decode(&payloads)
+	if len(payloads) != 2 {
+		t.Errorf("expected 2 payloads, got %d", len(payloads))
+	}
+}
+
+func TestHTTP_ListPayloads_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/payloads", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_GetPayload_Success(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	p := models.PayloadArtifact{TargetOS: "linux", TargetArch: "amd64", SHA256: "abc123", Status: "active"}
+	db.Create(&p)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/"+p.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got models.PayloadArtifact
+	json.NewDecoder(w.Body).Decode(&got)
+	if got.TargetOS != "linux" {
+		t.Errorf("target_os = %q, want %q", got.TargetOS, "linux")
+	}
+}
+
+func TestHTTP_GetPayload_NotFound(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_DownloadPayload_Success(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	binary := []byte("MZ fake binary content")
+	p := models.PayloadArtifact{
+		TargetOS:   "windows",
+		TargetArch: "amd64",
+		SHA256:     "dl-test-hash",
+		Status:     "active",
+		BinaryData: binary,
+	}
+	db.Create(&p)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/"+p.ID+"/download", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want application/octet-stream", ct)
+	}
+	if cd := w.Header().Get("Content-Disposition"); cd == "" {
+		t.Error("missing Content-Disposition header")
+	}
+	if w.Body.Len() != len(binary) {
+		t.Errorf("body length = %d, want %d", w.Body.Len(), len(binary))
+	}
+}
+
+func TestHTTP_DownloadPayload_WindowsDLL(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	p := models.PayloadArtifact{
+		TargetOS:   "windows",
+		TargetArch: "amd64",
+		Format:     "dll",
+		SHA256:     "dll-hash",
+		Status:     "active",
+		BinaryData: []byte("fake dll"),
+	}
+	db.Create(&p)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/"+p.ID+"/download", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	cd := w.Header().Get("Content-Disposition")
+	if !bytes.Contains([]byte(cd), []byte(".dll")) {
+		t.Errorf("Content-Disposition should contain .dll, got %q", cd)
+	}
+}
+
+func TestHTTP_DownloadPayload_Revoked(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	secret := []byte("should not be served")
+	p := models.PayloadArtifact{
+		TargetOS:   "linux",
+		TargetArch: "amd64",
+		SHA256:     "revoked-hash",
+		Status:     "revoked",
+		BinaryData: secret,
+	}
+	db.Create(&p)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/"+p.ID+"/download", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for revoked payload, got %d", w.Code)
+	}
+	if bytes.Contains(w.Body.Bytes(), secret) {
+		t.Error("response body must not contain the revoked payload's binary data")
+	}
+}
+
+func TestHTTP_DownloadPayload_NoBinary(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	p := models.PayloadArtifact{
+		TargetOS:   "linux",
+		TargetArch: "amd64",
+		SHA256:     "no-binary-hash",
+		Status:     "active",
+	}
+	db.Create(&p)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/"+p.ID+"/download", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for empty binary, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct == "application/octet-stream" {
+		t.Error("Content-Type should not be application/octet-stream when no binary exists")
+	}
+}
+
+func TestHTTP_DownloadPayload_NotFound(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/nonexistent/download", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_RevokePayload_Success(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	p := models.PayloadArtifact{
+		TargetOS:   "linux",
+		TargetArch: "amd64",
+		SHA256:     "revoke-test-hash",
+		Status:     "active",
+	}
+	db.Create(&p)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/payloads/"+p.ID+"/revoke", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]string
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["status"] != "revoked" {
+		t.Errorf("status = %q, want %q", result["status"], "revoked")
+	}
+
+	// Verify DB update.
+	var reloaded models.PayloadArtifact
+	db.First(&reloaded, "id = ?", p.ID)
+	if reloaded.Status != "revoked" {
+		t.Errorf("db status = %q, want %q", reloaded.Status, "revoked")
+	}
+}
+
+func TestHTTP_RevokePayload_NotFound(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/payloads/nonexistent/revoke", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_RevokePayload_MethodNotAllowed(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	p := models.PayloadArtifact{TargetOS: "linux", TargetArch: "amd64", SHA256: "revoke-method", Status: "active"}
+	db.Create(&p)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/"+p.ID+"/revoke", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_GeneratePayload_MissingTargetOS(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"target_arch":"amd64"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/payloads/generate", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing target_os, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTP_GeneratePayload_InvalidJSON(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/payloads/generate", bytes.NewBufferString(`{bad`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHTTP_GeneratePayload_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/generate", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_Payloads_NoAuth(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestHTTP_PayloadSubpath_NotFound(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	p := models.PayloadArtifact{TargetOS: "linux", TargetArch: "amd64", SHA256: "subpath-hash", Status: "active"}
+	db.Create(&p)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payloads/"+p.ID+"/bogus", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+// ── Operator Endpoints ──
+
+func TestHTTP_ListOperators_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/operators", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var operators []models.Operator
+	json.NewDecoder(w.Body).Decode(&operators)
+	// Default admin is auth-only (in-memory), not a DB Operator record.
+	if len(operators) != 0 {
+		t.Errorf("expected 0 operators, got %d", len(operators))
+	}
+}
+
+func TestHTTP_CreateThenListOperators(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"name":"listme","password":"pass123"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/operators", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/operators", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", w.Code)
+	}
+	var operators []models.Operator
+	json.NewDecoder(w.Body).Decode(&operators)
+	if len(operators) != 1 {
+		t.Errorf("expected 1 operator, got %d", len(operators))
+	}
+}
+
+func TestHTTP_CreateOperator_Success(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"name":"redteam1","password":"s3cret!","role":"operator"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/operators", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var op models.Operator
+	json.NewDecoder(w.Body).Decode(&op)
+	if op.ID == "" {
+		t.Error("operator ID should be set")
+	}
+	if op.Name != "redteam1" {
+		t.Errorf("name = %q, want %q", op.Name, "redteam1")
+	}
+	if op.Role != "operator" {
+		t.Errorf("role = %q, want %q", op.Role, "operator")
+	}
+}
+
+func TestHTTP_CreateOperator_DefaultRole(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"name":"norole","password":"pass123"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/operators", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var op models.Operator
+	json.NewDecoder(w.Body).Decode(&op)
+	if op.Role != "operator" {
+		t.Errorf("role = %q, want default %q", op.Role, "operator")
+	}
+}
+
+func TestHTTP_CreateOperator_MissingFields(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	for _, body := range []string{
+		`{"name":"","password":"pass123"}`,
+		`{"name":"user1","password":""}`,
+		`{"name":"","password":""}`,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/operators", bytes.NewBufferString(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("body=%s: expected 400, got %d", body, w.Code)
+		}
+	}
+}
+
+func TestHTTP_CreateOperator_InvalidJSON(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/operators", bytes.NewBufferString(`{nope`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHTTP_CreateOperator_CanLogin(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"name":"logintest","password":"mypass"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/operators", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", w.Code)
+	}
+
+	// Verify the new operator can log in.
+	loginBody := `{"username":"logintest","password":"mypass"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(loginBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("login: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTP_DeleteOperator_Success(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	op := models.Operator{Name: "todelete", Role: "operator"}
+	db.Create(&op)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/operators/"+op.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]string
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["status"] != "deleted" {
+		t.Errorf("status = %q, want %q", result["status"], "deleted")
+	}
+}
+
+func TestHTTP_DeleteOperator_NotFound(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/operators/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHTTP_DeleteOperator_MethodNotAllowed(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	op := models.Operator{Name: "noput", Role: "operator"}
+	db.Create(&op)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/operators/"+op.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_Operators_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/operators", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_Operators_NoAuth(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/operators", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// ── Server Status Endpoint ──
+
+func TestHTTP_ServerStatus_Success(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/server/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var status map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&status)
+
+	for _, key := range []string{"version", "uptime_seconds", "active_sessions", "go_version", "goroutines", "memory_alloc", "os", "arch"} {
+		if _, ok := status[key]; !ok {
+			t.Errorf("missing key %q in status response", key)
+		}
+	}
+}
+
+func TestHTTP_ServerStatus_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/server/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_ServerStatus_NoAuth(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/server/status", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
