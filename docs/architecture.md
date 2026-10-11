@@ -13,6 +13,7 @@ graph TD
         CMD_CLIENT["cmd/client<br/>main.go"]
         CMD_IMPLANT["cmd/implant<br/>main.go"]
         CMD_BUILDER["cmd/builder<br/>main.go (stub)"]
+        CMD_MCP["cmd/mcp<br/>main.go"]
     end
 
     subgraph "Server"
@@ -94,6 +95,9 @@ graph TD
     IMP_SAFETY -.-> CMD_IMPLANT
     IMP_TASK -.-> CMD_IMPLANT
 
+    %% cmd/mcp talks to httpapi over HTTP (no Go import)
+    CMD_MCP -.->|HTTP| HTTPAPI
+
     style GRPC_API fill:#555,stroke:#888,color:#ccc
     style MIDDLEWARE fill:#555,stroke:#888,color:#ccc
     style CONFIG fill:#555,stroke:#888,color:#ccc
@@ -130,6 +134,14 @@ graph TD
 - **Outputs**: Task results sent back to the server.
 - **Touches**: `pkg/envelope` (length-prefixed framing only; `ReadFrame`/`WriteFrame`).
 - **Note**: Does **not** use any of the structured `implant/` packages (runtime, safety, transport, task, modules, evasion). Implements its own TLS, registration, beacon loop, and task handlers inline.
+
+### `cmd/mcp` (Entry Point — MCP Server)
+
+- **Job**: MCP (Model Context Protocol) server for Claude Code integration. Wraps the C2's HTTP REST API as MCP tools, enabling AI-assisted operation.
+- **Inputs**: `--server` (C2 API URL), `--username`, `--password` flags. Receives MCP tool calls over stdio.
+- **Outputs**: JSON responses from the C2 API, formatted as MCP tool results.
+- **Touches**: The HTTP API (`server/api/httpapi`) over the network — no Go imports from other modules. Uses `github.com/mark3labs/mcp-go` SDK.
+- **Note**: Thin client. Authenticates with `POST /api/auth/login`, then proxies tool calls to the corresponding REST endpoints. Does not access the database or import any internal packages.
 
 ### `server/c2` (Core C2 Handler)
 
@@ -361,6 +373,16 @@ graph TD
 | 5 | | loop | Returns to step 1 |
 
 **Reconnection**: If any read/write fails, `beaconLoop` returns an error. The outer loop in `main()` (lines 305-353) reconnects with exponential backoff (1s base, 60s max), re-registers, and enters a new beacon loop.
+
+### Flow 8: MCP Tool Call (Claude Code → C2)
+
+| Step | File | Function / Line | What happens |
+|------|------|-----------------|--------------|
+| 1 | `cmd/mcp/main.go` | `main()` | Parses flags, authenticates via `POST /api/auth/login`, gets bearer token |
+| 2 | `cmd/mcp/main.go` | `server.ServeStdio(s)` | MCP server starts, reads JSON-RPC tool calls from stdin |
+| 3 | `cmd/mcp/main.go` | e.g. `listSessionsHandler()` | Receives `list_sessions` tool call, calls `GET /api/sessions` with bearer token |
+| 4 | `server/api/httpapi/sessions.go` | `handleSessions()` | Returns session list JSON (same as web portal) |
+| 5 | `cmd/mcp/main.go` | handler return | Returns API JSON as MCP `TextContent` to Claude Code |
 
 ---
 

@@ -5,6 +5,7 @@ use (
 	./cmd/builder
 	./cmd/client
 	./cmd/implant
+	./cmd/mcp
 	./cmd/server
 	./implant
 	./pkg

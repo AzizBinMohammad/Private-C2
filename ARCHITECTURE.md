@@ -1,6 +1,6 @@
 # Architecture
 
-Private-C2 is a Go 1.23 multi-module workspace organized into 7 modules. This document explains the project structure, how the modules interact, and the key design decisions.
+Private-C2 is a Go 1.23 multi-module workspace organized into 9 modules. This document explains the project structure, how the modules interact, and the key design decisions.
 
 ## Module Overview
 
@@ -21,6 +21,7 @@ go.work
 cmd/server  --> server --> pkg
 cmd/client  --> client --> pkg
 cmd/builder --> server --> pkg
+cmd/mcp     --> (HTTP) --> server/api/httpapi  (no Go import, network call)
                 implant --> pkg  (built separately via build pipeline)
 ```
 
@@ -258,7 +259,8 @@ Private-C2/
 |-- cmd/
 |   |-- server/main.go               # Server: TLS 1.3, gRPC + middleware, metrics, graceful shutdown
 |   |-- client/main.go               # Client: CLI entry point
-|   +-- builder/main.go              # Builder: payload generation entry point
+|   |-- builder/main.go              # Builder: payload generation entry point
+|   +-- mcp/main.go                  # MCP server: Claude Code integration via HTTP API wrapper
 |
 |-- proto/v1/                        # Protocol Buffer definitions
 |   |-- common.proto                 # Shared enums and base types

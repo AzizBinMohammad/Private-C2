@@ -7,7 +7,7 @@
 
 ## Language and Runtime
 
-* **Decision**: Go 1.23 with a `go.work` workspace linking 8 modules.
+* **Decision**: Go 1.23 with a `go.work` workspace linking 9 modules.
 * **Why (inferred)**: Go's static binaries and cross-compilation make it straightforward to produce implants for linux/amd64, windows/amd64, and darwin/arm64 from one source tree. The multi-module workspace keeps server, client, implant, and shared library dependency trees separate so the implant binary doesn't link server-only packages.
 * **What would conflict with it**: Introducing `replace` directives that break workspace resolution; adding CGO dependencies to the implant (prevents `CGO_ENABLED=0` cross-compilation); collapsing all modules into one `go.mod` (loses per-component dependency isolation).
 
@@ -127,7 +127,7 @@
 
 ## Go Workspace Module Boundaries
 
-* **Decision**: Eight separate Go modules (`pkg`, `server`, `client`, `implant`, `cmd/server`, `cmd/client`, `cmd/builder`, `cmd/implant`) linked by `go.work`.
+* **Decision**: Nine separate Go modules (`pkg`, `server`, `client`, `implant`, `cmd/server`, `cmd/client`, `cmd/builder`, `cmd/implant`, `cmd/mcp`) linked by `go.work`.
 * **Why (inferred)**: The implant module must not transitively pull in server dependencies (database drivers, HTTP router, Prometheus). Separate modules enforce this at the dependency level — the implant binary stays small and reveals nothing about the server.
 * **What would conflict with it**: Adding a shared types package imported by both server and implant would create a dependency bridge. Moving to a single `go.mod` would lose the isolation guarantee.
 
@@ -174,3 +174,11 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
 * **Engagement-scoped operations with kill switches**: More structured than most open-source C2 frameworks. This appears to be an original design decision, possibly influenced by commercial red-team tooling requirements rather than a specific open-source project.
 * **OT/ICS assessment module**: Unusual for a C2 framework. No widely-known C2 framework includes a dedicated OT assessment module with 17 industrial protocol clients. This appears to be original.
 * **Append-only hash-chained audit log**: Not standard in open-source C2 frameworks. This appears to be driven by compliance/legal requirements for authorized engagements.
+
+---
+
+## MCP Server: HTTP API Wrapper for Claude Code Integration
+
+* **Decision**: The MCP server (`cmd/mcp/`) is a standalone Go module that wraps the existing HTTP REST API as MCP tools. It communicates with the C2 server over HTTP using bearer token authentication. It does NOT import any internal packages — it is a pure API client.
+* **Why**: Enables Claude Code (AI operator console) to interact with the C2 directly. Using the HTTP API as the integration layer means the MCP server gets all API features for free and does not add coupling to server internals. The stdio transport is the standard for Claude Code MCP servers.
+* **What would conflict with it**: Breaking changes to the HTTP API without updating the MCP server's endpoint calls. Switching the operator API from REST to gRPC would require rewriting the MCP server's HTTP client layer. Adding MCP tools that need functionality not exposed by the HTTP API would require adding new API endpoints first (which benefits all clients, not just MCP).

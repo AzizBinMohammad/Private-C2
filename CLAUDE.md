@@ -8,7 +8,7 @@ Private-C2 is a Command and Control (C2) framework built in Go for **authorized 
 
 | Component | Version / Detail |
 |---|---|
-| Go | 1.23 (go.work workspace with 8 modules) |
+| Go | 1.23 (go.work workspace with 9 modules) |
 | GORM | 1.25.12 (ORM for database access) |
 | SQLite driver | gorm.io/driver/sqlite 1.5.6 |
 | PostgreSQL driver | gorm.io/driver/postgres 1.5.9 (pgx v5.5.5) |
@@ -18,13 +18,14 @@ Private-C2 is a Command and Control (C2) framework built in Go for **authorized 
 | UUID | github.com/google/uuid 1.6.0 |
 | Crypto | golang.org/x/crypto 0.28.0 (XChaCha20-Poly1305 via chacha20poly1305, bcrypt for auth) |
 | Docker base | golang:1.23-alpine (builder), alpine:3.19 (runtime) |
+| MCP SDK | github.com/mark3labs/mcp-go v1.2.1 |
 | Proto definitions | proto/v1/*.proto (7 files, code generation not wired up yet) |
 
 ## Folder Structure
 
 ```
 Private-C2/
-  go.work                  # Go workspace linking 8 modules
+  go.work                  # Go workspace linking 9 modules
   Makefile                 # Build, test, lint, docker, cross-compile targets
   Dockerfile               # Multi-stage Docker build for the server
   docker-compose.yml       # Server + PostgreSQL stack
@@ -34,6 +35,7 @@ Private-C2/
     client/main.go         # Operator CLI: interactive console over HTTP API
     builder/main.go        # Payload builder CLI (stub, prints usage only)
     implant/main.go        # Implant entry point: beacon loop, task execution
+    mcp/main.go            # MCP server: wraps HTTP API for Claude Code
 
   server/
     api/
@@ -205,6 +207,7 @@ Private-C2/
 - CORS headers set on all API responses
 - Bearer token authentication via middleware for protected routes
 - Public routes: `POST /api/auth/login`, static web UI at `/`
+- MCP server (`cmd/mcp/`) exposes the same API as MCP tools over stdio for Claude Code integration
 
 ### Security Patterns
 - TLS 1.2+ minimum (server), TLS 1.3 minimum (implant)
