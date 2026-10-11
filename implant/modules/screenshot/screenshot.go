@@ -9,6 +9,8 @@ import (
 	_ "image/png"
 	"os"
 	"os/exec"
+	"os/user"
+	"path/filepath"
 	"runtime"
 )
 
@@ -58,6 +60,22 @@ func captureScreen(ctx context.Context, req Request) (*Response, error) {
 	}
 }
 
+func x11Env() []string {
+	env := os.Environ()
+	if os.Getenv("DISPLAY") == "" {
+		env = append(env, "DISPLAY=:0")
+	}
+	if os.Getenv("XAUTHORITY") == "" {
+		if u, err := user.Current(); err == nil {
+			xauth := filepath.Join(u.HomeDir, ".Xauthority")
+			if _, err := os.Stat(xauth); err == nil {
+				env = append(env, "XAUTHORITY="+xauth)
+			}
+		}
+	}
+	return env
+}
+
 func captureLinux(ctx context.Context, req Request) (*Response, error) {
 	tmpFile, err := os.CreateTemp("", ".sc-*")
 	if err != nil {
@@ -74,6 +92,8 @@ func captureLinux(ctx context.Context, req Request) (*Response, error) {
 	outPath := tmpBase + ext
 	defer os.Remove(outPath)
 
+	env := x11Env()
+
 	type tool struct {
 		name string
 		fn   func() error
@@ -82,23 +102,29 @@ func captureLinux(ctx context.Context, req Request) (*Response, error) {
 	tools := []tool{
 		{"import", func() error {
 			cmd := exec.CommandContext(ctx, "import", "-window", "root", outPath)
+			cmd.Env = env
 			return cmd.Run()
 		}},
 		{"scrot", func() error {
 			cmd := exec.CommandContext(ctx, "scrot", outPath)
+			cmd.Env = env
 			return cmd.Run()
 		}},
 		{"xwd", func() error {
 			xwdPath := tmpBase + ".xwd"
 			defer os.Remove(xwdPath)
 			cmd := exec.CommandContext(ctx, "xwd", "-root", "-out", xwdPath)
+			cmd.Env = env
 			if err := cmd.Run(); err != nil {
 				return err
 			}
-			return exec.CommandContext(ctx, "convert", xwdPath, outPath).Run()
+			cmd2 := exec.CommandContext(ctx, "convert", xwdPath, outPath)
+			cmd2.Env = env
+			return cmd2.Run()
 		}},
 		{"gnome-screenshot", func() error {
 			cmd := exec.CommandContext(ctx, "gnome-screenshot", "-f", outPath)
+			cmd.Env = env
 			return cmd.Run()
 		}},
 	}
