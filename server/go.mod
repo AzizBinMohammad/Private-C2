@@ -6,6 +6,7 @@ require (
 	github.com/azizbinmohammad/private-c2/pkg v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.20.4
+	golang.org/x/crypto v0.28.0
 	google.golang.org/grpc v1.67.1
 	gorm.io/driver/postgres v1.5.9
 	gorm.io/driver/sqlite v1.5.6
@@ -27,7 +28,6 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
-	golang.org/x/crypto v0.28.0 // indirect
 	golang.org/x/net v0.28.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect

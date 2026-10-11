@@ -1,12 +1,12 @@
 go 1.23
 
 use (
+	./client
+	./cmd/builder
+	./cmd/client
+	./cmd/implant
+	./cmd/server
+	./implant
 	./pkg
 	./server
-	./client
-	./implant
-	./cmd/server
-	./cmd/client
-	./cmd/builder
-	./cmd/implant
 )

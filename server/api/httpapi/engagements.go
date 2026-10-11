@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azizbinmohammad/private-c2/pkg/engagement"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"gorm.io/gorm"
 )
@@ -139,12 +140,47 @@ func (eh *engagementHandler) handleEngagementDetail(w http.ResponseWriter, r *ht
 			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "engagement not found"})
 			return
 		}
-		// Check if target appears in the scope config
-		inScope := strings.Contains(eng.ScopeConfig, body.Target)
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+
+		if eng.ScopeConfig == "" {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"target":   body.Target,
+				"in_scope": false,
+				"reason":   "no scope configured",
+			})
+			return
+		}
+
+		var scopeCfg struct {
+			CIDRs     []string `json:"cidrs"`
+			Hostnames []string `json:"hostnames"`
+			Hosts     []string `json:"hosts"`
+			Targets   []string `json:"targets"`
+			Domains   []string `json:"domains"`
+			Excluded  []string `json:"excluded"`
+		}
+		if err := json.Unmarshal([]byte(eng.ScopeConfig), &scopeCfg); err != nil {
+			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "invalid scope config: " + err.Error()})
+			return
+		}
+
+		allHosts := append(scopeCfg.Hostnames, scopeCfg.Hosts...)
+		allHosts = append(allHosts, scopeCfg.Targets...)
+
+		scope, err := engagement.NewScope(scopeCfg.CIDRs, allHosts, scopeCfg.Domains, scopeCfg.Excluded)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "invalid scope config: " + err.Error()})
+			return
+		}
+
+		inScope, reason := scope.Contains(body.Target)
+		resp := map[string]interface{}{
 			"target":   body.Target,
 			"in_scope": inScope,
-		})
+		}
+		if reason != "" {
+			resp["reason"] = reason
+		}
+		writeJSON(w, http.StatusOK, resp)
 
 	default:
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "not found"})

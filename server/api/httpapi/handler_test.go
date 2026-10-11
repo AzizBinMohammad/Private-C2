@@ -503,14 +503,13 @@ func TestHTTP_ScopeCheck_InScope(t *testing.T) {
 	router, _, db := setupTestRouter(t)
 	token := getAuthToken(t, router)
 
-	// Create an engagement with scope config.
 	eng := models.Engagement{
 		Name:        "Test Engagement",
-		ScopeConfig: `{"cidrs":["10.0.0.0/24"],"hosts":["server1.internal"]}`,
+		ScopeConfig: `{"cidrs":["10.0.0.0/24"],"hostnames":["server1.internal"]}`,
 	}
 	db.Create(&eng)
 
-	body := `{"target":"10.0.0.0/24"}`
+	body := `{"target":"10.0.0.1"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -591,6 +590,276 @@ func TestHTTP_ScopeCheck_EngagementNotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+// ── Scope-check regression tests (known-issues #1) ──
+
+func TestHTTP_ScopeCheck_IPInCIDR(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "CIDR Test",
+		ScopeConfig: `{"cidrs":["10.0.0.0/24"]}`,
+	}
+	db.Create(&eng)
+
+	body := `{"target":"10.0.0.5"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["in_scope"] != true {
+		t.Errorf("10.0.0.5 is within 10.0.0.0/24, expected in_scope=true, got %v", result["in_scope"])
+	}
+}
+
+func TestHTTP_ScopeCheck_PartialStringFalsePositive(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "Partial String Test",
+		ScopeConfig: `{"cidrs":["10.0.0.0/24"]}`,
+	}
+	db.Create(&eng)
+
+	body := `{"target":"10.0"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["in_scope"] != false {
+		t.Errorf("10.0 is not a valid IP or hostname, expected in_scope=false, got %v", result["in_scope"])
+	}
+}
+
+func TestHTTP_ScopeCheck_HostnameCaseInsensitive(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "Hostname Case Test",
+		ScopeConfig: `{"hostnames":["server1.internal"]}`,
+	}
+	db.Create(&eng)
+
+	body := `{"target":"SERVER1.INTERNAL"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["in_scope"] != true {
+		t.Errorf("SERVER1.INTERNAL should match server1.internal case-insensitively, got in_scope=%v", result["in_scope"])
+	}
+}
+
+func TestHTTP_ScopeCheck_HostnamePartialFalsePositive(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "Hostname Partial Test",
+		ScopeConfig: `{"hosts":["server1.internal"]}`,
+	}
+	db.Create(&eng)
+
+	body := `{"target":"server1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["in_scope"] != false {
+		t.Errorf("server1 is not an exact match for server1.internal, expected in_scope=false, got %v", result["in_scope"])
+	}
+}
+
+func TestHTTP_ScopeCheck_DomainSuffixMatch(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "Domain Suffix Test",
+		ScopeConfig: `{"domains":["example.com"]}`,
+	}
+	db.Create(&eng)
+
+	body := `{"target":"app.example.com"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["in_scope"] != true {
+		t.Errorf("app.example.com should match domain example.com via suffix, got in_scope=%v", result["in_scope"])
+	}
+}
+
+func TestHTTP_ScopeCheck_ExclusionEnforced(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "Exclusion Test",
+		ScopeConfig: `{"cidrs":["10.0.0.0/24"],"excluded":["10.0.0.50"]}`,
+	}
+	db.Create(&eng)
+
+	body := `{"target":"10.0.0.50"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["in_scope"] != false {
+		t.Errorf("10.0.0.50 is explicitly excluded, expected in_scope=false, got %v", result["in_scope"])
+	}
+}
+
+func TestHTTP_ScopeCheck_MalformedScopeConfig(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "Malformed Test",
+		ScopeConfig: `not json`,
+	}
+	db.Create(&eng)
+
+	body := `{"target":"10.0.0.1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 for malformed scope config, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTP_ScopeCheck_EmptyScopeConfig(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "Empty Scope Test",
+		ScopeConfig: "",
+	}
+	db.Create(&eng)
+
+	body := `{"target":"10.0.0.1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["in_scope"] != false {
+		t.Errorf("empty scope config should mean nothing is in scope, got in_scope=%v", result["in_scope"])
+	}
+}
+
+func TestHTTP_ScopeCheck_ExclusionOnlyScope(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	eng := models.Engagement{
+		Name:        "Exclusion Only Test",
+		ScopeConfig: `{"excluded":["evil.host"]}`,
+	}
+	db.Create(&eng)
+
+	// Sub-case 1: target is in the excluded list — must be false because it's excluded.
+	body := `{"target":"evil.host"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("sub-case 1: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result1 map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result1)
+	if result1["in_scope"] != false {
+		t.Errorf("sub-case 1: evil.host is explicitly excluded, expected in_scope=false, got %v", result1["in_scope"])
+	}
+	reason1, _ := result1["reason"].(string)
+	if reason1 == "" {
+		t.Error("sub-case 1: expected a reason indicating the target is excluded")
+	}
+
+	// Sub-case 2: target is NOT in the excluded list — must be false because
+	// the scope has no CIDRs, hostnames, or domains, so nothing is in scope.
+	body2 := `{"target":"other.host"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/engagements/"+eng.ID+"/scope-check", bytes.NewBufferString(body2))
+	req2.Header.Set("Authorization", "Bearer "+token)
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("sub-case 2: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+	var result2 map[string]interface{}
+	json.NewDecoder(w2.Body).Decode(&result2)
+	if result2["in_scope"] != false {
+		t.Errorf("sub-case 2: other.host is not in any scope list, expected in_scope=false, got %v", result2["in_scope"])
+	}
+	reason2, _ := result2["reason"].(string)
+	if reason2 == "" {
+		t.Error("sub-case 2: expected a reason indicating target is not within engagement scope")
+	}
+	if reason1 == reason2 {
+		t.Errorf("sub-case 1 and 2 should have different reasons: excluded=%q vs not-in-scope=%q", reason1, reason2)
 	}
 }
 
