@@ -45,8 +45,10 @@ type PendingResponse struct {
 	Status string `json:"status"`
 }
 
+var newAuthManagerFn = NewAuthManager
+
 func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB) http.Handler {
-	auth := NewAuthManager()
+	auth := newAuthManagerFn()
 
 	mux := http.NewServeMux()
 

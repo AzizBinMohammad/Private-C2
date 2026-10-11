@@ -19,9 +19,20 @@ import (
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+func init() {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.MinCost)
+	newAuthManagerFn = func() *AuthManager {
+		return &AuthManager{
+			users:  map[string][]byte{"admin": hash},
+			tokens: make(map[string]*tokenEntry),
+		}
+	}
+}
 
 func setupTestRouter(t *testing.T) (http.Handler, *c2.ImplantServer, *gorm.DB) {
 	t.Helper()
@@ -1986,5 +1997,617 @@ func TestHTTP_ServerStatus_NoAuth(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// ── Audit Listing Endpoint ──
+
+func TestHTTP_ListAudit_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var entries []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&entries)
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+func TestHTTP_ListAudit_ReturnsEntries(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	insertAuditChain(t, db, 3)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var entries []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&entries)
+	if len(entries) != 3 {
+		t.Errorf("expected 3 entries, got %d", len(entries))
+	}
+}
+
+func TestHTTP_ListAudit_FilterByOperatorID(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	insertAuditChain(t, db, 3)
+	// Insert an entry with a different operator.
+	db.Create(&models.AuditEntry{
+		ID:         "other-op-entry",
+		CreatedAt:  time.Now(),
+		OperatorID: "other-op",
+		EventType:  "test",
+		Action:     "other-action",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?operator_id=other-op", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var entries []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&entries)
+	if len(entries) != 1 {
+		t.Errorf("expected 1 entry for other-op, got %d", len(entries))
+	}
+	if len(entries) > 0 && entries[0].OperatorID != "other-op" {
+		t.Errorf("operator_id = %q, want %q", entries[0].OperatorID, "other-op")
+	}
+}
+
+func TestHTTP_ListAudit_FilterByEventType(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	insertAuditChain(t, db, 2)
+	db.Create(&models.AuditEntry{
+		ID:         "special-event",
+		CreatedAt:  time.Now(),
+		OperatorID: "test-op",
+		EventType:  "killswitch",
+		Action:     "killed engagement",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?event_type=killswitch", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var entries []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&entries)
+	if len(entries) != 1 {
+		t.Errorf("expected 1 killswitch entry, got %d", len(entries))
+	}
+}
+
+func TestHTTP_ListAudit_FilterBySessionID(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.AuditEntry{
+		ID:         "sess-entry-1",
+		CreatedAt:  time.Now(),
+		OperatorID: "op1",
+		SessionID:  "sess-abc",
+		EventType:  "task",
+		Action:     "ran shell",
+	})
+	db.Create(&models.AuditEntry{
+		ID:         "sess-entry-2",
+		CreatedAt:  time.Now(),
+		OperatorID: "op1",
+		SessionID:  "sess-xyz",
+		EventType:  "task",
+		Action:     "ran ps",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?session_id=sess-abc", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var entries []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&entries)
+	if len(entries) != 1 {
+		t.Errorf("expected 1 entry for sess-abc, got %d", len(entries))
+	}
+}
+
+func TestHTTP_ListAudit_Pagination(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	insertAuditChain(t, db, 5)
+
+	// Page 1, limit 2.
+	req := httptest.NewRequest(http.MethodGet, "/api/audit?page=1&limit=2", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var page1 []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&page1)
+	if len(page1) != 2 {
+		t.Errorf("page 1: expected 2 entries, got %d", len(page1))
+	}
+
+	// Page 2, limit 2.
+	req = httptest.NewRequest(http.MethodGet, "/api/audit?page=2&limit=2", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var page2 []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&page2)
+	if len(page2) != 2 {
+		t.Errorf("page 2: expected 2 entries, got %d", len(page2))
+	}
+
+	// Page 3, limit 2 — should get the remaining 1 entry.
+	req = httptest.NewRequest(http.MethodGet, "/api/audit?page=3&limit=2", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var page3 []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&page3)
+	if len(page3) != 1 {
+		t.Errorf("page 3: expected 1 entry, got %d", len(page3))
+	}
+
+	// Pages should not overlap.
+	seen := make(map[string]bool)
+	for _, e := range page1 {
+		seen[e.ID] = true
+	}
+	for _, e := range page2 {
+		if seen[e.ID] {
+			t.Errorf("entry %s appears on both page 1 and page 2", e.ID)
+		}
+		seen[e.ID] = true
+	}
+	for _, e := range page3 {
+		if seen[e.ID] {
+			t.Errorf("entry %s appears on page 3 and a previous page", e.ID)
+		}
+	}
+}
+
+func TestHTTP_ListAudit_PaginationDefaults(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	// Insert more than the default limit (50) to verify the cap.
+	insertAuditChain(t, db, 55)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var entries []models.AuditEntry
+	json.NewDecoder(w.Body).Decode(&entries)
+	if len(entries) != 50 {
+		t.Errorf("expected default limit of 50, got %d", len(entries))
+	}
+}
+
+func TestHTTP_ListAudit_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/audit", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_ListAudit_NoAuth(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// ── OT/ICS Endpoints ──
+
+func TestHTTP_OT_Assets_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/assets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var records []models.OTAssetRecord
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
+	}
+}
+
+func TestHTTP_OT_Assets_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.OTAssetRecord{EngagementID: "eng-1", IP: "10.0.0.1", Vendor: "Siemens"})
+	db.Create(&models.OTAssetRecord{EngagementID: "eng-1", IP: "10.0.0.2", Vendor: "Rockwell"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/assets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTAssetRecord
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 2 {
+		t.Errorf("expected 2 records, got %d", len(records))
+	}
+}
+
+func TestHTTP_OT_Assets_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ot/assets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_OT_Vulns_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/vulns", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTVulnFinding
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
+	}
+}
+
+func TestHTTP_OT_Vulns_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.OTVulnFinding{EngagementID: "eng-1", CVEID: "CVE-2024-0001", Severity: "critical", CVSS: 9.8})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/vulns", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTVulnFinding
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].CVEID != "CVE-2024-0001" {
+		t.Errorf("cve_id = %q, want %q", records[0].CVEID, "CVE-2024-0001")
+	}
+}
+
+func TestHTTP_OT_Vulns_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ot/vulns", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_OT_Credentials_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/credentials", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTCredentialFinding
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
+	}
+}
+
+func TestHTTP_OT_Credentials_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.OTCredentialFinding{EngagementID: "eng-1", Target: "10.0.0.5", Service: "modbus", Port: 502, Username: "admin", IsDefault: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/credentials", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTCredentialFinding
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].Service != "modbus" {
+		t.Errorf("service = %q, want %q", records[0].Service, "modbus")
+	}
+}
+
+func TestHTTP_OT_Credentials_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ot/credentials", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_OT_Compliance_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/compliance", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTComplianceFinding
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
+	}
+}
+
+func TestHTTP_OT_Compliance_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.OTComplianceFinding{EngagementID: "eng-1", Framework: "IEC 62443", Requirement: "SR 1.1", Status: "fail", Severity: "high"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/compliance", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTComplianceFinding
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].Framework != "IEC 62443" {
+		t.Errorf("framework = %q, want %q", records[0].Framework, "IEC 62443")
+	}
+}
+
+func TestHTTP_OT_Compliance_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ot/compliance", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_OT_Topology_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/topology", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTTopologyEdge
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
+	}
+}
+
+func TestHTTP_OT_Topology_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.OTTopologyEdge{EngagementID: "eng-1", SourceIP: "10.0.0.1", TargetIP: "10.0.0.2", Protocol: "modbus", Port: 502})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/topology", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTTopologyEdge
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].Protocol != "modbus" {
+		t.Errorf("protocol = %q, want %q", records[0].Protocol, "modbus")
+	}
+}
+
+func TestHTTP_OT_Topology_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ot/topology", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_OT_Reports_Empty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/reports", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTAssessmentReport
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
+	}
+}
+
+func TestHTTP_OT_Reports_WithData(t *testing.T) {
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	db.Create(&models.OTAssessmentReport{EngagementID: "eng-1", Title: "Q4 OT Assessment", Format: "json", GeneratedAt: time.Now(), GeneratedBy: "admin"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ot/reports", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var records []models.OTAssessmentReport
+	json.NewDecoder(w.Body).Decode(&records)
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].Title != "Q4 OT Assessment" {
+		t.Errorf("title = %q, want %q", records[0].Title, "Q4 OT Assessment")
+	}
+}
+
+func TestHTTP_OT_Reports_MethodNotAllowed(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ot/reports", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestHTTP_OT_NoAuth(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+
+	for _, path := range []string{
+		"/api/ot/assets",
+		"/api/ot/vulns",
+		"/api/ot/credentials",
+		"/api/ot/compliance",
+		"/api/ot/topology",
+		"/api/ot/reports",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("%s: expected 401, got %d", path, w.Code)
+		}
 	}
 }
