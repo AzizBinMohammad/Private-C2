@@ -5,24 +5,16 @@ code was changed.
 
 ---
 
-## 1. HTTP API scope-check uses `strings.Contains` instead of `Scope.Contains`
+## ~~1. HTTP API scope-check uses `strings.Contains` instead of `Scope.Contains`~~
 
-**File:** `server/api/httpapi/handler.go:455`
+**RESOLVED** — commit `769ad3d` on branch `bugfix-A-scope-contains`.
 
-**Symptom:** The `POST /api/engagements/{id}/scope-check` endpoint checks whether a
-target is in scope by doing `strings.Contains(eng.ScopeConfig, body.Target)`. This
-is a simple substring match on the raw JSON string, not a proper CIDR/hostname/domain
-check. A target like `"10.0"` would match a scope config containing `"10.0.0.0/24"`
-even though `10.0` is not a valid IP in that range.
-
-**How to reproduce:**
-1. Create an engagement with `scope_config: '{"cidrs":["10.0.0.0/24"]}'`
-2. POST to `/api/engagements/{id}/scope-check` with `{"target":"10.0"}`
-3. Response is `in_scope: true` — incorrect.
-
-The `pkg/engagement.Scope.Contains` function does proper CIDR parsing, hostname
-matching, domain suffix matching, and exclusion checks. The HTTP endpoint does not
-use it.
+The scope-check endpoint (`server/api/httpapi/engagements.go`) now unmarshals
+`ScopeConfig` JSON, merges `hostnames`/`hosts`/`targets` keys for backwards
+compatibility, builds a `pkg/engagement.Scope`, and calls `scope.Contains(target)`.
+Returns proper errors for malformed or empty configs. Covered by 13 tests
+(4 original + 9 regression) including CIDR containment, partial-string rejection,
+case-insensitive hostname, domain suffix, exclusion enforcement, and edge cases.
 
 ---
 
