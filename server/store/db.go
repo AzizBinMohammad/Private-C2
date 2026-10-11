@@ -61,6 +61,11 @@ func Open(cfg Config) (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 
+	if cfg.Dialect == "sqlite" && cfg.DSN == ":memory:" {
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+	}
+
 	return db, nil
 }
 
