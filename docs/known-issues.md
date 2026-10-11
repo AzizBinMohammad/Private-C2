@@ -102,3 +102,33 @@ store.Migrate(db) // fails
 UPDATE: Resolved in step 3. setupTestRouter tests now use a bcrypt.MinCost
 override (test-only, via newAuthManagerFn indirection in handler.go) instead
 of DefaultCost. Full suite with -race now runs in ~75s instead of ~300s.
+
+---
+
+## 5. Implant silently falls back to InsecureSkipVerify when no CA is provided
+
+**File:** `cmd/implant/main.go:74`
+
+**Symptom:** When the implant's `--ca` flag is empty (the default), `buildTLSConfig`
+sets `InsecureSkipVerify: true` without any warning or log message. This means the
+implant will connect to any server presenting any certificate, making it vulnerable
+to MITM attacks. The operator has no indication that verification was skipped.
+
+By contrast, `implant/transport/mtls/mtls.go` explicitly hardcodes
+`InsecureSkipVerify: false` and requires a CA cert, and
+`implant/transport/https/https.go` exposes `InsecureSkipVerify` as an explicit
+config option rather than a silent fallback.
+
+**Origin:** Introduced in commit `fd8349b` ("Wire up C2 framework end-to-end") as
+part of the initial implant entry point. No commit message, code comment, or
+`docs/decisions.md` entry documents this as an intentional tradeoff.
+`docs/decisions.md` documents the server's self-signed cert fallback as intentional
+but does not mention the implant's corresponding insecure-verification fallback.
+
+**Security relevance:** A deployed implant without a `--ca` flag accepts any
+certificate, enabling interception of C2 traffic. This is likely a development
+convenience (pairing with the server's self-signed cert fallback) that should either
+be documented as an accepted risk for local development, or changed to require an
+explicit `--insecure` flag rather than silently degrading.
+
+**Not fixing in this refactor** — flagging for a separate security review.
