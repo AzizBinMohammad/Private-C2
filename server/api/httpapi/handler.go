@@ -8,25 +8,17 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 //go:embed webui
 var webUIFS embed.FS
-
-// serverStartTime records when the server started for uptime calculation.
-var serverStartTime = time.Now()
 
 type TaskRequest struct {
 	Type string `json:"type"`
@@ -93,300 +85,20 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB) http.Handler {
 
 	// ───────────────── Payloads ─────────────────
 
-	api.HandleFunc("/api/payloads", func(w http.ResponseWriter, r *http.Request) {
-		setCORS(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.URL.Path != "/api/payloads" {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "not found"})
-			return
-		}
-		if r.Method != http.MethodGet {
-			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
-			return
-		}
-		var payloads []models.PayloadArtifact
-		if err := db.Find(&payloads).Error; err != nil {
-			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, payloads)
-	})
-
-	api.HandleFunc("/api/payloads/", func(w http.ResponseWriter, r *http.Request) {
-		setCORS(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		path := strings.TrimPrefix(r.URL.Path, "/api/payloads/")
-
-		if path == "generate" {
-			if r.Method != http.MethodPost {
-				writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
-				return
-			}
-			var payload models.PayloadArtifact
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid JSON: " + err.Error()})
-				return
-			}
-			if payload.TargetOS == "" {
-				writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "target_os is required"})
-				return
-			}
-
-			arch := payload.TargetArch
-			if arch == "" || arch == "auto" {
-				arch = "amd64"
-			}
-
-			archMap := map[string][]string{
-				"windows": {"amd64", "arm64", "386"},
-				"linux":   {"amd64", "arm64", "386", "mips", "mipsle", "riscv64"},
-				"darwin":  {"amd64", "arm64"},
-				"freebsd": {"amd64", "arm64"},
-				"ios":     {"arm64"},
-				"android": {"arm64", "arm"},
-			}
-
-			if arch == "multi" {
-				arches, ok := archMap[payload.TargetOS]
-				if !ok {
-					arches = []string{"amd64"}
-				}
-				var created []models.PayloadArtifact
-				for _, a := range arches {
-					p, err := buildImplant(db, payload, payload.TargetOS, a)
-					if err != nil {
-						writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("%s/%s: %v", payload.TargetOS, a, err)})
-						return
-					}
-					created = append(created, *p)
-				}
-				writeJSON(w, http.StatusCreated, created)
-				return
-			}
-
-			p, err := buildImplant(db, payload, payload.TargetOS, arch)
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusCreated, p)
-			return
-		}
-
-		if path == "download" {
-			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "specify payload ID: /api/payloads/{id}/download"})
-			return
-		}
-
-		parts := strings.SplitN(path, "/", 2)
-		payloadID := parts[0]
-
-		if payloadID == "" {
-			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "missing payload ID"})
-			return
-		}
-
-		if len(parts) == 1 {
-			if r.Method != http.MethodGet {
-				writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
-				return
-			}
-			var payload models.PayloadArtifact
-			if err := db.First(&payload, "id = ?", payloadID).Error; err != nil {
-				writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "payload not found"})
-				return
-			}
-			writeJSON(w, http.StatusOK, payload)
-			return
-		}
-
-		if parts[1] == "download" {
-				if r.Method != http.MethodGet {
-					writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
-					return
-				}
-				var payload models.PayloadArtifact
-				if err := db.First(&payload, "id = ?", payloadID).Error; err != nil {
-					writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "payload not found"})
-					return
-				}
-				if payload.Status == "revoked" {
-					writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "payload has been revoked"})
-					return
-				}
-				if len(payload.BinaryData) == 0 {
-					writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "no binary data available"})
-					return
-				}
-				ext := ""
-				switch payload.TargetOS {
-				case "windows":
-					switch payload.Format {
-					case "dll":
-						ext = ".dll"
-					case "shellcode":
-						ext = ".bin"
-					default:
-						ext = ".exe"
-					}
-				default:
-					if payload.Format == "shared" {
-						ext = ".so"
-					}
-				}
-				filename := fmt.Sprintf("implant-%s-%s%s", payload.TargetOS, payload.TargetArch, ext)
-				w.Header().Set("Content-Type", "application/octet-stream")
-				w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
-				w.Header().Set("Content-Length", strconv.Itoa(len(payload.BinaryData)))
-				w.Write(payload.BinaryData)
-				return
-			}
-
-			if parts[1] == "revoke" {
-			if r.Method != http.MethodPost {
-				writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
-				return
-			}
-			res := db.Model(&models.PayloadArtifact{}).Where("id = ?", payloadID).Update("status", "revoked")
-			if res.Error != nil {
-				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: res.Error.Error()})
-				return
-			}
-			if res.RowsAffected == 0 {
-				writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "payload not found"})
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
-			return
-		}
-
-		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "not found"})
-	})
+	ph := &payloadHandler{db: db}
+	api.HandleFunc("/api/payloads", ph.handlePayloads)
+	api.HandleFunc("/api/payloads/", ph.handlePayloadDetail)
 
 	// ───────────────── Operators ─────────────────
 
-	api.HandleFunc("/api/operators", func(w http.ResponseWriter, r *http.Request) {
-		setCORS(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.URL.Path != "/api/operators" {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "not found"})
-			return
-		}
-		switch r.Method {
-		case http.MethodGet:
-			var operators []models.Operator
-			if err := db.Find(&operators).Error; err != nil {
-				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusOK, operators)
-		case http.MethodPost:
-			var body struct {
-				Name     string `json:"name"`
-				Role     string `json:"role"`
-				Password string `json:"password"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid JSON: " + err.Error()})
-				return
-			}
-			if body.Name == "" || body.Password == "" {
-				writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "name and password are required"})
-				return
-			}
-			if body.Role == "" {
-				body.Role = "operator"
-			}
-			// Hash the password and store it in CertPEM field as bcrypt hash
-			hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to hash password"})
-				return
-			}
-			op := models.Operator{
-				Name:    body.Name,
-				Role:    body.Role,
-				CertPEM: hash,
-			}
-			if err := db.Create(&op).Error; err != nil {
-				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
-				return
-			}
-			// Also register the operator in the auth system
-			auth.SetPassword(body.Name, body.Password)
-			writeJSON(w, http.StatusCreated, op)
-		default:
-			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
-		}
-	})
-
-	api.HandleFunc("/api/operators/", func(w http.ResponseWriter, r *http.Request) {
-		setCORS(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		opID := strings.TrimPrefix(r.URL.Path, "/api/operators/")
-		if opID == "" {
-			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "missing operator ID"})
-			return
-		}
-		if r.Method != http.MethodDelete {
-			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
-			return
-		}
-		res := db.Where("id = ?", opID).Delete(&models.Operator{})
-		if res.Error != nil {
-			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: res.Error.Error()})
-			return
-		}
-		if res.RowsAffected == 0 {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "operator not found"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-	})
+	oh := &operatorHandler{db: db, auth: auth}
+	api.HandleFunc("/api/operators", oh.handleOperators)
+	api.HandleFunc("/api/operators/", oh.handleOperatorDetail)
 
 	// ───────────────── Server Status ─────────────────
 
-	api.HandleFunc("/api/server/status", func(w http.ResponseWriter, r *http.Request) {
-		setCORS(w)
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodGet {
-			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
-			return
-		}
-
-		var memStats runtime.MemStats
-		runtime.ReadMemStats(&memStats)
-
-		activeSessions := len(implantServer.ListSessions())
-
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"version":         "0.1.0",
-			"uptime_seconds":  int(time.Since(serverStartTime).Seconds()),
-			"active_sessions": activeSessions,
-			"go_version":      runtime.Version(),
-			"goroutines":      runtime.NumGoroutine(),
-			"memory_alloc":    memStats.Alloc,
-			"os":              runtime.GOOS,
-			"arch":            runtime.GOARCH,
-		})
-	})
+	st := &statusHandler{implantServer: implantServer}
+	api.HandleFunc("/api/server/status", st.handleServerStatus)
 
 	// ───────────────── Audit ─────────────────
 
@@ -646,67 +358,4 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
-}
-
-func buildImplant(db *gorm.DB, base models.PayloadArtifact, goos, goarch string) (*models.PayloadArtifact, error) {
-	tmpDir, err := os.MkdirTemp("", "pc2-build-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	ext := ""
-	if goos == "windows" {
-		ext = ".exe"
-	}
-	outPath := filepath.Join(tmpDir, "implant"+ext)
-
-	// Find project root (where go.work lives)
-	exePath, _ := os.Executable()
-	projectRoot := filepath.Dir(filepath.Dir(filepath.Dir(exePath)))
-	// Fallback: look for go.work by walking up from cwd
-	if _, err := os.Stat(filepath.Join(projectRoot, "go.work")); err != nil {
-		cwd, _ := os.Getwd()
-		for d := cwd; d != "/"; d = filepath.Dir(d) {
-			if _, err := os.Stat(filepath.Join(d, "go.work")); err == nil {
-				projectRoot = d
-				break
-			}
-		}
-	}
-
-	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-trimpath", "-o", outPath, "./cmd/implant/...")
-	cmd.Dir = projectRoot
-	cmd.Env = append(os.Environ(),
-		"GOOS="+goos,
-		"GOARCH="+goarch,
-		"CGO_ENABLED=0",
-	)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("build failed: %s: %w", string(output), err)
-	}
-
-	binData, err := os.ReadFile(outPath)
-	if err != nil {
-		return nil, fmt.Errorf("read binary: %w", err)
-	}
-
-	hash := sha256.Sum256(binData)
-
-	payload := base
-	payload.ID = ""
-	payload.TargetOS = goos
-	payload.TargetArch = goarch
-	payload.Status = "active"
-	payload.SHA256 = hex.EncodeToString(hash[:])
-	payload.FileSize = int64(len(binData))
-	payload.BinaryData = binData
-
-	if err := db.Create(&payload).Error; err != nil {
-		return nil, fmt.Errorf("save payload: %w", err)
-	}
-
-	return &payload, nil
 }
