@@ -98,3 +98,7 @@ store.Migrate(db) // fails
   (165.9s). Fix: raise the timeout in the test command/CI config to at least
   3-5 minutes, or share a single pre-hashed test user across tests instead of
   calling the real login/bcrypt path each time.
+
+UPDATE: Resolved in step 3. setupTestRouter tests now use a bcrypt.MinCost
+override (test-only, via newAuthManagerFn indirection in handler.go) instead
+of DefaultCost. Full suite with -race now runs in ~75s instead of ~300s.
