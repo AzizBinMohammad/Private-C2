@@ -71,12 +71,12 @@ func Open(cfg Config) (*gorm.DB, error) {
 
 func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(
+		&models.Engagement{},
 		&models.Operator{},
 		&models.Session{},
 		&models.Beacon{},
 		&models.Listener{},
 		&models.PayloadArtifact{},
-		&models.Engagement{},
 		&models.AuditEntry{},
 		&models.C2Profile{},
 		&models.Role{},
