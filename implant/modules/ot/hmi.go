@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,10 +17,10 @@ import (
 
 // HMIAssessment holds the complete HMI web interface assessment.
 type HMIAssessment struct {
-	Target       string         `json:"target"`
-	Interfaces   []HMIInterface `json:"interfaces"`
-	Findings     []HMIFinding   `json:"findings"`
-	Recommendations []string    `json:"recommendations"`
+	Target          string         `json:"target"`
+	Interfaces      []HMIInterface `json:"interfaces"`
+	Findings        []HMIFinding   `json:"findings"`
+	Recommendations []string       `json:"recommendations"`
 }
 
 // HMIInterface represents a detected HMI web interface.
@@ -77,11 +78,11 @@ func (ha *HMIAssessor) Assess(ctx context.Context, target string) (*HMIAssessmen
 		{443, "https"},
 		{8080, "http"},
 		{8443, "https"},
-		{3000, "http"},   // Grafana
-		{8088, "http"},   // Ignition
-		{8043, "https"},  // Ignition SSL
-		{81, "http"},     // Alternate HTTP
-		{4443, "https"},  // Alternate HTTPS
+		{3000, "http"},  // Grafana
+		{8088, "http"},  // Ignition
+		{8043, "https"}, // Ignition SSL
+		{81, "http"},    // Alternate HTTP
+		{4443, "https"}, // Alternate HTTPS
 	}
 
 	for _, p := range ports {
@@ -110,7 +111,7 @@ func (ha *HMIAssessor) Assess(ctx context.Context, target string) (*HMIAssessmen
 // probeWebInterface checks a single port for a web interface - GET only.
 func (ha *HMIAssessor) probeWebInterface(ctx context.Context, target string, port int, scheme string) *HMIInterface {
 	// First check if port is open
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, time.Duration(ha.module.config.QueryTimeoutMs)*time.Millisecond)
 	if err != nil {
 		return nil

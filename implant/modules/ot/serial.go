@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,32 +14,32 @@ import (
 
 // SerialPortInfo describes a serial port or serial-to-Ethernet converter.
 type SerialPortInfo struct {
-	IP         string `json:"ip"`
-	Port       int    `json:"port"`
-	Type       string `json:"type"` // "serial_server", "terminal_server", "protocol_converter"
-	Vendor     string `json:"vendor,omitempty"`
-	Model      string `json:"model,omitempty"`
-	NumPorts   int    `json:"num_ports,omitempty"`
-	Protocol   string `json:"protocol,omitempty"` // Serial protocol bridged
-	BaudRate   int    `json:"baud_rate,omitempty"`
-	Banner     string `json:"banner,omitempty"`
+	IP       string `json:"ip"`
+	Port     int    `json:"port"`
+	Type     string `json:"type"` // "serial_server", "terminal_server", "protocol_converter"
+	Vendor   string `json:"vendor,omitempty"`
+	Model    string `json:"model,omitempty"`
+	NumPorts int    `json:"num_ports,omitempty"`
+	Protocol string `json:"protocol,omitempty"` // Serial protocol bridged
+	BaudRate int    `json:"baud_rate,omitempty"`
+	Banner   string `json:"banner,omitempty"`
 }
 
 // FieldbusInfo describes a detected fieldbus network.
 type FieldbusInfo struct {
-	Type       string `json:"type"` // "modbus_rtu", "profibus", "devicenet", "foundation_fieldbus", "asi"
-	Gateway    string `json:"gateway,omitempty"`
-	Protocol   string `json:"bridge_protocol,omitempty"`
-	DeviceCount int   `json:"device_count,omitempty"`
-	Evidence   string `json:"evidence"`
+	Type        string `json:"type"` // "modbus_rtu", "profibus", "devicenet", "foundation_fieldbus", "asi"
+	Gateway     string `json:"gateway,omitempty"`
+	Protocol    string `json:"bridge_protocol,omitempty"`
+	DeviceCount int    `json:"device_count,omitempty"`
+	Evidence    string `json:"evidence"`
 }
 
 // SerialAssessment holds the serial/fieldbus enumeration results.
 type SerialAssessment struct {
-	SerialPorts  []SerialPortInfo   `json:"serial_ports"`
-	Fieldbuses   []FieldbusInfo     `json:"fieldbuses"`
-	Findings     []SerialFinding    `json:"findings"`
-	Recommendations []string        `json:"recommendations"`
+	SerialPorts     []SerialPortInfo `json:"serial_ports"`
+	Fieldbuses      []FieldbusInfo   `json:"fieldbuses"`
+	Findings        []SerialFinding  `json:"findings"`
+	Recommendations []string         `json:"recommendations"`
 }
 
 // SerialFinding is a security finding related to serial infrastructure.
@@ -92,8 +93,8 @@ func (ss *SerialScanner) Enumerate(ctx context.Context, assets []OTAsset) (*Seri
 func (ss *SerialScanner) detectSerialServer(ctx context.Context, asset OTAsset, result *SerialAssessment) {
 	// Common serial server vendors and models
 	serialVendors := []struct {
-		vendor  string
-		models  []string
+		vendor string
+		models []string
 	}{
 		{"moxa", []string{"nport", "mgate", "mb3"}},
 		{"digi", []string{"portserver", "connect"}},
@@ -178,10 +179,10 @@ func (ss *SerialScanner) scanSerialConverterPorts(ctx context.Context, assets []
 	// Common serial-over-TCP ports
 	serialPorts := []int{
 		4001, 4002, 4003, 4004, // Moxa NPort defaults
-		3001, 3002, 3003,       // Digi PortServer
-		10001, 10002,           // Lantronix
-		8000, 8001,             // Generic
-		7001, 7002,             // Perle IOLAN
+		3001, 3002, 3003, // Digi PortServer
+		10001, 10002, // Lantronix
+		8000, 8001, // Generic
+		7001, 7002, // Perle IOLAN
 	}
 
 	timeout := time.Duration(ss.module.config.QueryTimeoutMs) * time.Millisecond
@@ -198,7 +199,7 @@ func (ss *SerialScanner) scanSerialConverterPorts(ctx context.Context, assets []
 		}
 
 		for _, port := range serialPorts {
-			addr := fmt.Sprintf("%s:%d", asset.IP, port)
+			addr := net.JoinHostPort(asset.IP, strconv.Itoa(port))
 			conn, err := net.DialTimeout("tcp", addr, timeout)
 			if err != nil {
 				continue

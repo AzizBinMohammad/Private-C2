@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 )
 
@@ -11,13 +12,13 @@ import (
 type WirelessProtocol string
 
 const (
-	WirelessWiFi         WirelessProtocol = "wifi"
-	WirelessHART         WirelessProtocol = "wirelesshart"
-	WirelessISA100       WirelessProtocol = "isa100.11a"
-	WirelessZigbee       WirelessProtocol = "zigbee"
-	WirelessBLE          WirelessProtocol = "ble"
-	WirelessLTE          WirelessProtocol = "lte_private"
-	WirelessLoRa         WirelessProtocol = "lora"
+	WirelessWiFi   WirelessProtocol = "wifi"
+	WirelessHART   WirelessProtocol = "wirelesshart"
+	WirelessISA100 WirelessProtocol = "isa100.11a"
+	WirelessZigbee WirelessProtocol = "zigbee"
+	WirelessBLE    WirelessProtocol = "ble"
+	WirelessLTE    WirelessProtocol = "lte_private"
+	WirelessLoRa   WirelessProtocol = "lora"
 )
 
 // WirelessFinding represents a detected wireless presence.
@@ -36,10 +37,10 @@ type WirelessFinding struct {
 
 // WirelessAssessment holds the complete wireless assessment result.
 type WirelessAssessment struct {
-	Findings       []WirelessFinding `json:"findings"`
-	WiFiAPs        []WiFiAP          `json:"wifi_aps,omitempty"`
-	IndustrialWL   []IndustrialWireless `json:"industrial_wireless,omitempty"`
-	Recommendations []string          `json:"recommendations"`
+	Findings        []WirelessFinding    `json:"findings"`
+	WiFiAPs         []WiFiAP             `json:"wifi_aps,omitempty"`
+	IndustrialWL    []IndustrialWireless `json:"industrial_wireless,omitempty"`
+	Recommendations []string             `json:"recommendations"`
 }
 
 // WiFiAP represents a detected WiFi access point.
@@ -321,7 +322,7 @@ func netContains(s, sub string) bool {
 
 // CheckWirelessPort checks if a known wireless management port is open - READ ONLY.
 func (ws *WirelessScanner) CheckWirelessPort(target string, port int) bool {
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, time.Duration(ws.module.config.QueryTimeoutMs)*time.Millisecond)
 	if err != nil {
 		return false

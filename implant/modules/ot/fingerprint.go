@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,23 +26,23 @@ const (
 
 // FingerprintResult holds the combined fingerprint for a device.
 type FingerprintResult struct {
-	IP           string             `json:"ip"`
-	Vendor       string             `json:"vendor"`
-	Model        string             `json:"model"`
-	Firmware     string             `json:"firmware"`
-	DeviceType   string             `json:"device_type"`
-	Confidence   float64            `json:"confidence"`
-	Sources      []FingerprintEntry `json:"sources"`
-	CVEs         []CVEReference     `json:"cves,omitempty"`
-	Tags         []string           `json:"tags"`
+	IP         string             `json:"ip"`
+	Vendor     string             `json:"vendor"`
+	Model      string             `json:"model"`
+	Firmware   string             `json:"firmware"`
+	DeviceType string             `json:"device_type"`
+	Confidence float64            `json:"confidence"`
+	Sources    []FingerprintEntry `json:"sources"`
+	CVEs       []CVEReference     `json:"cves,omitempty"`
+	Tags       []string           `json:"tags"`
 }
 
 // FingerprintEntry is a single data point contributing to a fingerprint.
 type FingerprintEntry struct {
 	Source     FingerprintSource `json:"source"`
-	Field     string            `json:"field"`
-	Value     string            `json:"value"`
-	Confidence float64          `json:"confidence"`
+	Field      string            `json:"field"`
+	Value      string            `json:"value"`
+	Confidence float64           `json:"confidence"`
 }
 
 // CVEReference is a cross-reference to a known vulnerability.
@@ -175,7 +176,7 @@ func (f *Fingerprinter) fingerprintHTTP(ctx context.Context, target string, resu
 // fingerprintTLS checks TLS certificates for device info - READ ONLY.
 func (f *Fingerprinter) fingerprintTLS(ctx context.Context, target string, result *FingerprintResult) {
 	for _, port := range []int{443, 8443, 4843, 502} {
-		addr := fmt.Sprintf("%s:%d", target, port)
+		addr := net.JoinHostPort(target, strconv.Itoa(port))
 		conn, err := net.DialTimeout("tcp", addr, time.Second*3)
 		if err != nil {
 			continue

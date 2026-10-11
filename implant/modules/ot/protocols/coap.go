@@ -25,21 +25,21 @@ const (
 
 // CoAP Option Numbers
 const (
-	CoAPOptionUriHost     = 3
-	CoAPOptionUriPort     = 7
-	CoAPOptionUriPath     = 11
+	CoAPOptionUriHost       = 3
+	CoAPOptionUriPort       = 7
+	CoAPOptionUriPath       = 11
 	CoAPOptionContentFormat = 12
-	CoAPOptionUriQuery    = 15
-	CoAPOptionAccept      = 17
+	CoAPOptionUriQuery      = 15
+	CoAPOptionAccept        = 17
 )
 
 // CoAP Content Formats
 const (
-	CoAPContentTextPlain      = 0
-	CoAPContentAppLinkFormat  = 40
-	CoAPContentAppXML         = 41
-	CoAPContentAppJSON        = 50
-	CoAPContentAppCBOR        = 60
+	CoAPContentTextPlain     = 0
+	CoAPContentAppLinkFormat = 40
+	CoAPContentAppXML        = 41
+	CoAPContentAppJSON       = 50
+	CoAPContentAppCBOR       = 60
 )
 
 // SAFETY: CoAP client implements ONLY GET requests.
@@ -59,35 +59,35 @@ type CoAPClient struct {
 
 // CoAPResource represents a discovered CoAP resource.
 type CoAPResource struct {
-	Path        string            `json:"path"`
-	Title       string            `json:"title,omitempty"`
-	ResourceType string           `json:"rt,omitempty"`
-	InterfaceDesc string          `json:"if,omitempty"`
-	ContentFormat int             `json:"ct,omitempty"`
-	Size         int              `json:"sz,omitempty"`
-	Observable   bool             `json:"obs,omitempty"`
-	Attributes   map[string]string `json:"attributes,omitempty"`
+	Path          string            `json:"path"`
+	Title         string            `json:"title,omitempty"`
+	ResourceType  string            `json:"rt,omitempty"`
+	InterfaceDesc string            `json:"if,omitempty"`
+	ContentFormat int               `json:"ct,omitempty"`
+	Size          int               `json:"sz,omitempty"`
+	Observable    bool              `json:"obs,omitempty"`
+	Attributes    map[string]string `json:"attributes,omitempty"`
 }
 
 // CoAPResponse holds a CoAP response.
 type CoAPResponse struct {
-	Type          byte   `json:"type"`
-	Code          byte   `json:"code"`
-	CodeClass     byte   `json:"code_class"`
-	CodeDetail    byte   `json:"code_detail"`
-	MessageID     uint16 `json:"message_id"`
-	Token         []byte `json:"token"`
-	Payload       []byte `json:"payload"`
-	ContentFormat int    `json:"content_format"`
+	Type          byte           `json:"type"`
+	Code          byte           `json:"code"`
+	CodeClass     byte           `json:"code_class"`
+	CodeDetail    byte           `json:"code_detail"`
+	MessageID     uint16         `json:"message_id"`
+	Token         []byte         `json:"token"`
+	Payload       []byte         `json:"payload"`
+	ContentFormat int            `json:"content_format"`
 	Options       map[int][]byte `json:"options,omitempty"`
 }
 
 // CoAPSecurityInfo holds CoAP/DTLS security assessment.
 type CoAPSecurityInfo struct {
-	DTLSSupported bool   `json:"dtls_supported"`
-	DTLSPort      int    `json:"dtls_port"`
+	DTLSSupported bool     `json:"dtls_supported"`
+	DTLSPort      int      `json:"dtls_port"`
 	CipherSuites  []string `json:"cipher_suites,omitempty"`
-	Certificate   string `json:"certificate,omitempty"`
+	Certificate   string   `json:"certificate,omitempty"`
 }
 
 // NewCoAPClient creates a new read-only CoAP client.
@@ -161,8 +161,8 @@ func (c *CoAPClient) buildRequest(msgType byte, method byte, uriPath string) []b
 	// Header: 4 bytes
 	header := make([]byte, 4)
 	header[0] = (1 << 6) | (msgType << 4) | byte(len(c.token)) // Version 1, type, token length
-	header[1] = method                                           // Code
-	binary.BigEndian.PutUint16(header[2:4], c.messageID)        // Message ID
+	header[1] = method                                         // Code
+	binary.BigEndian.PutUint16(header[2:4], c.messageID)       // Message ID
 
 	packet := append(header, c.token...)
 
@@ -256,7 +256,7 @@ func (c *CoAPClient) DetectDTLS() (*CoAPSecurityInfo, error) {
 	}
 
 	// Try connecting to the DTLS port
-	addr := fmt.Sprintf("%s:%d", c.target, 5684)
+	addr := net.JoinHostPort(c.target, "5684")
 	conn, err := net.DialTimeout("udp", addr, c.config.Timeout)
 	if err != nil {
 		info.DTLSSupported = false

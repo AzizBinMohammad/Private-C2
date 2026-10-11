@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,54 +13,54 @@ import (
 
 // OTAsset represents a discovered OT/ICS device.
 type OTAsset struct {
-	IP           string    `json:"ip"`
-	MAC          string    `json:"mac"`
-	Vendor       string    `json:"vendor"`
-	Model        string    `json:"model"`
-	Firmware     string    `json:"firmware"`
-	Protocol     string    `json:"protocol"`
-	Protocols    []string  `json:"protocols"`
-	Role         string    `json:"role"` // PLC, HMI, RTU, DCS, EWS, Historian, Gateway, IO, Sensor
-	SafetyRated  bool      `json:"safety_rated"`
-	SILLevel     int       `json:"sil_level"`     // 0-4
-	PurdueLevel  int       `json:"purdue_level"`  // 0-5
-	Hostname     string    `json:"hostname"`
-	Description  string    `json:"description"`
-	SerialNumber string    `json:"serial_number"`
-	ProductCode  string    `json:"product_code"`
-	OpenPorts    []int     `json:"open_ports"`
-	Services     []string  `json:"services"`
-	Banners      map[string]string `json:"banners"`
-	LastSeen     time.Time `json:"last_seen"`
-	FirstSeen    time.Time `json:"first_seen"`
-	DiscoveryMethod string `json:"discovery_method"`
-	Confidence   float64   `json:"confidence"` // 0.0-1.0
-	Tags         []string  `json:"tags"`
-	RawData      map[string]any `json:"raw_data,omitempty"`
+	IP              string            `json:"ip"`
+	MAC             string            `json:"mac"`
+	Vendor          string            `json:"vendor"`
+	Model           string            `json:"model"`
+	Firmware        string            `json:"firmware"`
+	Protocol        string            `json:"protocol"`
+	Protocols       []string          `json:"protocols"`
+	Role            string            `json:"role"` // PLC, HMI, RTU, DCS, EWS, Historian, Gateway, IO, Sensor
+	SafetyRated     bool              `json:"safety_rated"`
+	SILLevel        int               `json:"sil_level"`    // 0-4
+	PurdueLevel     int               `json:"purdue_level"` // 0-5
+	Hostname        string            `json:"hostname"`
+	Description     string            `json:"description"`
+	SerialNumber    string            `json:"serial_number"`
+	ProductCode     string            `json:"product_code"`
+	OpenPorts       []int             `json:"open_ports"`
+	Services        []string          `json:"services"`
+	Banners         map[string]string `json:"banners"`
+	LastSeen        time.Time         `json:"last_seen"`
+	FirstSeen       time.Time         `json:"first_seen"`
+	DiscoveryMethod string            `json:"discovery_method"`
+	Confidence      float64           `json:"confidence"` // 0.0-1.0
+	Tags            []string          `json:"tags"`
+	RawData         map[string]any    `json:"raw_data,omitempty"`
 }
 
 // DiscoveryConfig controls how discovery operates.
 type DiscoveryConfig struct {
-	Passive      bool          `json:"passive"`
-	Active       bool          `json:"active"`
-	Timeout      time.Duration `json:"timeout"`
-	PortList     []int         `json:"port_list"`
-	ARPScan      bool          `json:"arp_scan"`
-	OUILookup    bool          `json:"oui_lookup"`
-	BannerGrab   bool          `json:"banner_grab"`
-	ProbeProtos  []string      `json:"probe_protocols"`
+	Passive     bool          `json:"passive"`
+	Active      bool          `json:"active"`
+	Timeout     time.Duration `json:"timeout"`
+	PortList    []int         `json:"port_list"`
+	ARPScan     bool          `json:"arp_scan"`
+	OUILookup   bool          `json:"oui_lookup"`
+	BannerGrab  bool          `json:"banner_grab"`
+	ProbeProtos []string      `json:"probe_protocols"`
 }
 
 // DefaultDiscoveryConfig returns conservative defaults for OT discovery.
 func DefaultDiscoveryConfig() DiscoveryConfig {
 	return DiscoveryConfig{
-		Passive:   true,
-		Active:    false,
-		Timeout:   time.Second * 5,
-		PortList:  commonOTPorts(),
-		ARPScan:   false,
-		OUILookup: true,
-		BannerGrab: true,
+		Passive:     true,
+		Active:      false,
+		Timeout:     time.Second * 5,
+		PortList:    commonOTPorts(),
+		ARPScan:     false,
+		OUILookup:   true,
+		BannerGrab:  true,
 		ProbeProtos: []string{"modbus", "ethernetip", "s7comm", "bacnet", "dnp3"},
 	}
 }
@@ -124,7 +125,7 @@ func (d *Discovery) PassiveDiscover(ctx context.Context, iface string) ([]OTAsse
 		proto   string
 		network string
 	}{
-		{47808, "bacnet", "udp4"},  // BACnet
+		{47808, "bacnet", "udp4"},   // BACnet
 		{34962, "profinet", "udp4"}, // PROFINET DCP
 		{1883, "mqtt", "tcp4"},      // MQTT (only listen, no connect)
 	}
@@ -267,11 +268,11 @@ func (d *Discovery) ActiveDiscover(ctx context.Context, targets []string) ([]OTA
 // scanTarget performs port scanning and protocol probing on a single target.
 func (d *Discovery) scanTarget(ctx context.Context, target string) ([]OTAsset, error) {
 	asset := &OTAsset{
-		IP:        target,
-		Banners:   make(map[string]string),
-		RawData:   make(map[string]any),
-		FirstSeen: time.Now(),
-		LastSeen:  time.Now(),
+		IP:              target,
+		Banners:         make(map[string]string),
+		RawData:         make(map[string]any),
+		FirstSeen:       time.Now(),
+		LastSeen:        time.Now(),
 		DiscoveryMethod: "active",
 	}
 
@@ -331,7 +332,7 @@ func (d *Discovery) scanPorts(ctx context.Context, target string, ports []int) [
 		default:
 		}
 
-		addr := fmt.Sprintf("%s:%d", target, port)
+		addr := net.JoinHostPort(target, strconv.Itoa(port))
 		conn, err := net.DialTimeout("tcp", addr, d.config.Timeout)
 		if err != nil {
 			continue
@@ -345,7 +346,7 @@ func (d *Discovery) scanPorts(ctx context.Context, target string, ports []int) [
 
 // grabBanner connects to a port and reads any initial data sent.
 func (d *Discovery) grabBanner(ctx context.Context, target string, port int) string {
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, d.config.Timeout)
 	if err != nil {
 		return ""
@@ -399,7 +400,7 @@ func (d *Discovery) probeProtocol(ctx context.Context, target string, port int) 
 
 // probeModbus sends a Modbus read device identification request (FC43/14).
 func (d *Discovery) probeModbus(_ context.Context, target string, port int) string {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", target, port), d.config.Timeout)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(target, strconv.Itoa(port)), d.config.Timeout)
 	if err != nil {
 		return ""
 	}
@@ -410,11 +411,11 @@ func (d *Discovery) probeModbus(_ context.Context, target string, port int) stri
 		0x00, 0x01, // Transaction ID
 		0x00, 0x00, // Protocol ID (Modbus)
 		0x00, 0x05, // Length
-		0x01,       // Unit ID
-		0x2B,       // FC 43 (Read Device Identification)
-		0x0E,       // MEI type 14
-		0x01,       // Read Device ID code: basic
-		0x00,       // Object ID: VendorName
+		0x01, // Unit ID
+		0x2B, // FC 43 (Read Device Identification)
+		0x0E, // MEI type 14
+		0x01, // Read Device ID code: basic
+		0x00, // Object ID: VendorName
 	}
 
 	_ = conn.SetDeadline(time.Now().Add(d.config.Timeout))
@@ -437,7 +438,7 @@ func (d *Discovery) probeModbus(_ context.Context, target string, port int) stri
 
 // probeEtherNetIP sends a ListIdentity request.
 func (d *Discovery) probeEtherNetIP(_ context.Context, target string, port int) string {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", target, port), d.config.Timeout)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(target, strconv.Itoa(port)), d.config.Timeout)
 	if err != nil {
 		return ""
 	}
@@ -468,7 +469,7 @@ func (d *Discovery) probeEtherNetIP(_ context.Context, target string, port int) 
 
 // probeS7 sends a COTP Connection Request to detect S7Comm.
 func (d *Discovery) probeS7(_ context.Context, target string, port int) string {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", target, port), d.config.Timeout)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(target, strconv.Itoa(port)), d.config.Timeout)
 	if err != nil {
 		return ""
 	}
@@ -478,8 +479,8 @@ func (d *Discovery) probeS7(_ context.Context, target string, port int) string {
 	req := []byte{
 		0x03, 0x00, 0x00, 0x16, // TPKT: version 3, length 22
 		0x11, 0xE0, 0x00, 0x00, // COTP CR, dst ref 0, src ref 0
-		0x00, 0x01, 0x00,       // Class 0
-		0xC0, 0x01, 0x0A,       // TPDU size: 1024
+		0x00, 0x01, 0x00, // Class 0
+		0xC0, 0x01, 0x0A, // TPDU size: 1024
 		0xC1, 0x02, 0x01, 0x00, // Source TSAP
 		0xC2, 0x02, 0x01, 0x02, // Destination TSAP
 	}
@@ -503,7 +504,7 @@ func (d *Discovery) probeS7(_ context.Context, target string, port int) string {
 
 // probeBACnet sends a BACnet Who-Is broadcast.
 func (d *Discovery) probeBACnet(_ context.Context, target string, port int) string {
-	conn, err := net.DialTimeout("udp", fmt.Sprintf("%s:%d", target, port), d.config.Timeout)
+	conn, err := net.DialTimeout("udp", net.JoinHostPort(target, strconv.Itoa(port)), d.config.Timeout)
 	if err != nil {
 		return ""
 	}
@@ -512,11 +513,11 @@ func (d *Discovery) probeBACnet(_ context.Context, target string, port int) stri
 	// BVLC header + NPDU + Who-Is
 	req := []byte{
 		0x81, 0x0A, 0x00, 0x11, // BVLC: type 0x81, Original-Unicast, length 17
-		0x01, 0x04,             // NPDU: version 1, control
-		0x00, 0x05,             // DNET: broadcast
-		0x00,                   // DLEN: 0
-		0xFF,                   // Hop count
-		0x10, 0x08,             // APDU: Unconfirmed Who-Is
+		0x01, 0x04, // NPDU: version 1, control
+		0x00, 0x05, // DNET: broadcast
+		0x00,       // DLEN: 0
+		0xFF,       // Hop count
+		0x10, 0x08, // APDU: Unconfirmed Who-Is
 	}
 
 	_ = conn.SetDeadline(time.Now().Add(d.config.Timeout))
@@ -538,7 +539,7 @@ func (d *Discovery) probeBACnet(_ context.Context, target string, port int) stri
 
 // probeIEC104 sends a STARTDT act APCI frame.
 func (d *Discovery) probeIEC104(_ context.Context, target string, port int) string {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", target, port), d.config.Timeout)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(target, strconv.Itoa(port)), d.config.Timeout)
 	if err != nil {
 		return ""
 	}
@@ -566,7 +567,7 @@ func (d *Discovery) probeIEC104(_ context.Context, target string, port int) stri
 
 // probeDNP3 sends a DNP3 link layer request (read class 0).
 func (d *Discovery) probeDNP3(_ context.Context, target string, port int) string {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", target, port), d.config.Timeout)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(target, strconv.Itoa(port)), d.config.Timeout)
 	if err != nil {
 		return ""
 	}

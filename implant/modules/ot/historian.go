@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,28 +18,28 @@ import (
 type HistorianType string
 
 const (
-	HistorianOSIsoftPI     HistorianType = "osisoft_pi"
-	HistorianWonderware    HistorianType = "wonderware_historian"
-	HistorianGEProfiler    HistorianType = "ge_proficy"
-	HistorianHoneywell     HistorianType = "honeywell_phd"
-	HistorianIgnition      HistorianType = "ignition"
-	HistorianSCADA         HistorianType = "generic_scada"
-	HistorianUnknown       HistorianType = "unknown"
+	HistorianOSIsoftPI  HistorianType = "osisoft_pi"
+	HistorianWonderware HistorianType = "wonderware_historian"
+	HistorianGEProfiler HistorianType = "ge_proficy"
+	HistorianHoneywell  HistorianType = "honeywell_phd"
+	HistorianIgnition   HistorianType = "ignition"
+	HistorianSCADA      HistorianType = "generic_scada"
+	HistorianUnknown    HistorianType = "unknown"
 )
 
 // HistorianInfo holds detected historian information.
 type HistorianInfo struct {
-	IP           string        `json:"ip"`
-	Type         HistorianType `json:"type"`
-	Version      string        `json:"version,omitempty"`
-	Vendor       string        `json:"vendor"`
-	Product      string        `json:"product"`
-	WebInterface bool          `json:"web_interface"`
-	WebPorts     []int         `json:"web_ports,omitempty"`
-	APIEndpoints []string      `json:"api_endpoints,omitempty"`
-	AuthRequired bool          `json:"auth_required"`
-	TLSEnabled   bool          `json:"tls_enabled"`
-	OpenPorts    []int         `json:"open_ports"`
+	IP           string             `json:"ip"`
+	Type         HistorianType      `json:"type"`
+	Version      string             `json:"version,omitempty"`
+	Vendor       string             `json:"vendor"`
+	Product      string             `json:"product"`
+	WebInterface bool               `json:"web_interface"`
+	WebPorts     []int              `json:"web_ports,omitempty"`
+	APIEndpoints []string           `json:"api_endpoints,omitempty"`
+	AuthRequired bool               `json:"auth_required"`
+	TLSEnabled   bool               `json:"tls_enabled"`
+	OpenPorts    []int              `json:"open_ports"`
 	Findings     []HistorianFinding `json:"findings"`
 }
 
@@ -59,11 +60,11 @@ type HistorianAssessment struct {
 
 // SCADAInfo holds detected SCADA server information.
 type SCADAInfo struct {
-	IP       string `json:"ip"`
-	Product  string `json:"product"`
-	Vendor   string `json:"vendor"`
-	WebPort  int    `json:"web_port,omitempty"`
-	Version  string `json:"version,omitempty"`
+	IP      string `json:"ip"`
+	Product string `json:"product"`
+	Vendor  string `json:"vendor"`
+	WebPort int    `json:"web_port,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 // HistorianDetector detects and assesses historian/SCADA systems.
@@ -125,21 +126,21 @@ func (hd *HistorianDetector) detectHistorian(ctx context.Context, asset OTAsset)
 
 	// Check known historian ports
 	historianPorts := map[int]string{
-		5450:  "osisoft_pi_af",      // PI AF Server
-		5457:  "osisoft_pi_data",    // PI Data Archive
-		5459:  "osisoft_pi_web",     // PI Web API
+		5450:  "osisoft_pi_af",   // PI AF Server
+		5457:  "osisoft_pi_data", // PI Data Archive
+		5459:  "osisoft_pi_web",  // PI Web API
 		443:   "https",
 		80:    "http",
-		8088:  "ignition",           // Ignition Gateway
-		8043:  "ignition_ssl",       // Ignition Gateway SSL
-		1433:  "mssql",             // Wonderware uses SQL Server
-		39320: "ge_proficy",        // Proficy Historian
+		8088:  "ignition",     // Ignition Gateway
+		8043:  "ignition_ssl", // Ignition Gateway SSL
+		1433:  "mssql",        // Wonderware uses SQL Server
+		39320: "ge_proficy",   // Proficy Historian
 	}
 
 	timeout := time.Duration(hd.module.config.QueryTimeoutMs) * time.Millisecond
 
 	for port, svc := range historianPorts {
-		addr := fmt.Sprintf("%s:%d", asset.IP, port)
+		addr := net.JoinHostPort(asset.IP, strconv.Itoa(port))
 		conn, err := net.DialTimeout("tcp", addr, timeout)
 		if err != nil {
 			continue

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 )
 
@@ -51,18 +52,18 @@ type InferredFirewall struct {
 
 // VLANInfo holds detected VLAN information.
 type VLANInfo struct {
-	ID          int      `json:"id"`
-	Name        string   `json:"name,omitempty"`
-	Subnet      string   `json:"subnet,omitempty"`
+	ID          int         `json:"id"`
+	Name        string      `json:"name,omitempty"`
+	Subnet      string      `json:"subnet,omitempty"`
 	PurdueLevel PurdueLevel `json:"purdue_level"`
-	Devices     []string `json:"devices"`
+	Devices     []string    `json:"devices"`
 }
 
 // SegmentationAnalyzer performs Purdue model segmentation analysis.
 type SegmentationAnalyzer struct {
-	module  *OTModule
-	assets  []OTAsset
-	topo    *NetworkTopology
+	module *OTModule
+	assets []OTAsset
+	topo   *NetworkTopology
 }
 
 // NewSegmentationAnalyzer creates a new segmentation analyzer.
@@ -408,12 +409,12 @@ func purdueLabel(level PurdueLevel) string {
 
 // SegmentationTestResult holds results from a reachability probe.
 type SegmentationTestResult struct {
-	SrcIP       string        `json:"src_ip"`
-	DstIP       string        `json:"dst_ip"`
-	Port        int           `json:"port"`
-	Reachable   bool          `json:"reachable"`
-	Latency     time.Duration `json:"latency"`
-	TTL         int           `json:"ttl,omitempty"`
+	SrcIP     string        `json:"src_ip"`
+	DstIP     string        `json:"dst_ip"`
+	Port      int           `json:"port"`
+	Reachable bool          `json:"reachable"`
+	Latency   time.Duration `json:"latency"`
+	TTL       int           `json:"ttl,omitempty"`
 }
 
 // TestReachability performs a single TCP connect test - READ ONLY.
@@ -428,7 +429,7 @@ func (sa *SegmentationAnalyzer) TestReachability(ctx context.Context, target str
 	}
 
 	start := time.Now()
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, time.Duration(sa.module.config.QueryTimeoutMs)*time.Millisecond)
 	result.Latency = time.Since(start)
 

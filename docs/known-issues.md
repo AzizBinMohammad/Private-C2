@@ -73,15 +73,15 @@ store.Migrate(db) // fails
 ```
 
 **Workaround:** Use a temp file path instead of `:memory:` for test databases.
-- go vet warnings: several files use fmt.Sprintf("%s:%d", ...) for addresses, which breaks with IPv6 (net.Dial). Files: modules/ot/protocols/coap.go, modules/ot/protocols/common.go, modules/network/network.go, modules/ot/discovery.go, modules/ot/fingerprint.go, modules/ot/historian.go, modules/ot/hmi.go, modules/ot/segmentation.go, modules/ot/serial.go, modules/ot/wireless.go. Pre-existing, unrelated to refactor. Fix with net.JoinHostPort.
-
-- go vet warnings: several files build addresses with fmt.Sprintf("%s:%d", ...)
-  before net.Dial, which breaks with IPv6. Files: modules/ot/protocols/coap.go,
+- ~~go vet warnings: fmt.Sprintf("%s:%d", ...) for network addresses~~
+  **RESOLVED** — branch `bugfix-ipv6-joinhostport`. Replaced all 21 call sites
+  across 10 files with net.JoinHostPort (11 flagged by go vet, 10 additional
+  inline-in-DialTimeout sites that go vet missed). Display-only address strings
+  (iec104.go, mqtt.go, opcua.go) left as-is. Files: modules/ot/protocols/coap.go,
   modules/ot/protocols/common.go, modules/network/network.go,
-  modules/ot/discovery.go, modules/ot/fingerprint.go, modules/ot/historian.go,
-  modules/ot/hmi.go, modules/ot/segmentation.go, modules/ot/serial.go,
-  modules/ot/wireless.go. Pre-existing, unrelated to the protocol refactor.
-  Fix with net.JoinHostPort(host, port).
+  modules/ot/discovery.go (8 sites), modules/ot/fingerprint.go,
+  modules/ot/historian.go, modules/ot/hmi.go, modules/ot/segmentation.go,
+  modules/ot/serial.go, modules/ot/wireless.go.
 
 - Test suite timeout: `make test` (or CI) using `-race` with a 2-minute
   timeout is too tight now that server/api/httpapi/handler_test.go has grown

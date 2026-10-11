@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 )
 
@@ -55,9 +56,9 @@ type DeviceInfo struct {
 
 // ConnConfig holds connection configuration.
 type ConnConfig struct {
-	Timeout        time.Duration
+	Timeout          time.Duration
 	InterPacketDelay time.Duration
-	MaxRetries     int
+	MaxRetries       int
 }
 
 // DefaultConnConfig returns conservative connection defaults for OT devices.
@@ -71,7 +72,7 @@ func DefaultConnConfig() ConnConfig {
 
 // tcpConnect establishes a TCP connection with timeout.
 func tcpConnect(target string, port int, timeout time.Duration) (net.Conn, error) {
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to %s: %w", addr, err)
@@ -81,7 +82,7 @@ func tcpConnect(target string, port int, timeout time.Duration) (net.Conn, error
 
 // udpConnect creates a UDP connection.
 func udpConnect(target string, port int, timeout time.Duration) (net.Conn, error) {
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, strconv.Itoa(port))
 	raddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("resolving %s: %w", addr, err)

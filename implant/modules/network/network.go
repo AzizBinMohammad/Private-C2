@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,26 +28,26 @@ const (
 // Request represents a network operation request.
 type Request struct {
 	Op      Operation `json:"op"`
-	Target  string    `json:"target,omitempty"`   // for portscan, resolve
-	Ports   []int     `json:"ports,omitempty"`    // for portscan
-	Timeout int       `json:"timeout,omitempty"`  // milliseconds
+	Target  string    `json:"target,omitempty"`  // for portscan, resolve
+	Ports   []int     `json:"ports,omitempty"`   // for portscan
+	Timeout int       `json:"timeout,omitempty"` // milliseconds
 }
 
 // InterfaceInfo represents a network interface.
 type InterfaceInfo struct {
-	Name       string   `json:"name"`
-	MTU        int      `json:"mtu"`
-	Flags      string   `json:"flags"`
-	HWAddr     string   `json:"hw_addr,omitempty"`
-	Addresses  []string `json:"addresses"`
+	Name      string   `json:"name"`
+	MTU       int      `json:"mtu"`
+	Flags     string   `json:"flags"`
+	HWAddr    string   `json:"hw_addr,omitempty"`
+	Addresses []string `json:"addresses"`
 }
 
 // ConnectionInfo represents a network connection.
 type ConnectionInfo struct {
-	Protocol  string `json:"protocol"`
-	LocalAddr string `json:"local_addr"`
+	Protocol   string `json:"protocol"`
+	LocalAddr  string `json:"local_addr"`
 	RemoteAddr string `json:"remote_addr"`
-	State     string `json:"state"`
+	State      string `json:"state"`
 }
 
 // PortResult represents the result of scanning a single port.
@@ -204,7 +205,7 @@ func (m *Module) portscan(ctx context.Context, req Request) (*Response, error) {
 			defer func() { <-sem }()
 
 			result := PortResult{Port: p}
-			addr := fmt.Sprintf("%s:%d", req.Target, p)
+			addr := net.JoinHostPort(req.Target, strconv.Itoa(p))
 
 			conn, err := net.DialTimeout("tcp", addr, timeout)
 			if err == nil {
