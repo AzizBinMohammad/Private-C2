@@ -51,20 +51,52 @@ func ServerTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
 			return nil, fmt.Errorf("failed to parse CA certificate")
 		}
 		cfg.ClientCAs = pool
-		cfg.ClientAuth = tls.NoClientCert
-		log.Printf("Loaded CA certificate from %s (client auth not required)", caFile)
+		// Supplying a CA means "authenticate implants with a client
+		// certificate". Without this, the listener accepts any TLS client —
+		// any host able to reach the port could register as an implant.
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+		log.Printf("Loaded CA certificate from %s (client certificate required)", caFile)
+	} else {
+		log.Println("No --ca provided: implants will NOT be authenticated by client certificate")
 	}
 
 	return cfg, nil
 }
 
-func ClientTLSConfig(caPath string) (*tls.Config, error) {
+// ClientOptions configures a client-side (implant) TLS connection.
+type ClientOptions struct {
+	// CAPath is the PEM CA used to verify the server certificate. It is
+	// required unless Insecure is set.
+	CAPath string
+
+	// CertFile and KeyFile are the PEM client certificate and key presented
+	// to the server when the listener requires client authentication. Both
+	// must be set together.
+	CertFile string
+	KeyFile  string
+
+	// Insecure skips server certificate verification entirely. It is
+	// development-only: without verification the implant cannot tell a real
+	// C2 server from an impostor, and will hand its client certificate to
+	// whoever answers the port.
+	Insecure bool
+}
+
+// ClientTLSConfig builds the TLS configuration for an implant connecting to a
+// C2 server.
+func ClientTLSConfig(opts ClientOptions) (*tls.Config, error) {
 	cfg := &tls.Config{
 		MinVersion: tls.VersionTLS13,
 	}
 
-	if caPath != "" {
-		caPEM, err := os.ReadFile(caPath)
+	switch {
+	case opts.Insecure:
+		log.Println("WARNING: --insecure set; server certificate verification is disabled")
+		cfg.InsecureSkipVerify = true
+	case opts.CAPath == "":
+		return nil, fmt.Errorf("no CA certificate provided: pass --ca <ca.pem> to verify the server, or --insecure to disable verification explicitly")
+	default:
+		caPEM, err := os.ReadFile(opts.CAPath)
 		if err != nil {
 			return nil, fmt.Errorf("read CA cert: %w", err)
 		}
@@ -73,8 +105,18 @@ func ClientTLSConfig(caPath string) (*tls.Config, error) {
 			return nil, fmt.Errorf("failed to parse CA cert")
 		}
 		cfg.RootCAs = pool
-	} else {
-		cfg.InsecureSkipVerify = true
+	}
+
+	if (opts.CertFile == "") != (opts.KeyFile == "") {
+		return nil, fmt.Errorf("client certificate and key must be provided together (got cert=%q key=%q)", opts.CertFile, opts.KeyFile)
+	}
+	if opts.CertFile != "" {
+		cert, err := tls.LoadX509KeyPair(opts.CertFile, opts.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("loading client cert/key: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+		log.Printf("Loaded client certificate from %s", opts.CertFile)
 	}
 
 	return cfg, nil

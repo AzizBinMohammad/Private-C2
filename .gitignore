@@ -1,0 +1,22 @@
+# ---- Build output ----
+bin/
+
+# ---- Generated TLS material ----
+# Contains PRIVATE KEYS (ca-key.pem, server-key.pem, implant-key.pem).
+# Regenerate with scripts/setup-ca.sh; these must never be committed.
+certs/
+
+# ---- Local runtime state ----
+*.db
+*.db-journal
+*.db-wal
+
+# ---- Binaries built into the source tree ----
+# `go build ./cmd/<name>` without -o drops the binary in the cwd, so building
+# from inside a cmd/ directory leaves one behind next to the source.
+/mcp
+/cmd/builder/builder
+/cmd/client/client
+/cmd/implant/implant
+/cmd/mcp/mcp
+/cmd/server/server

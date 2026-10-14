@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -56,31 +57,33 @@ func main() {
 	implantServer := c2.NewImplantServer()
 
 	// --- TLS listener for implants ---
-	tlsListener, err := tls.Listen("tcp", *listenAddr, tlsConfig)
+	//
+	// Registered with the implant server rather than bound directly, so the
+	// API reports the listener that is actually running and operators can stop
+	// it. The listener is served on the port from --listen; StartListener
+	// takes a bind address and a port separately.
+	bindHost, bindPort, err := net.SplitHostPort(*listenAddr)
 	if err != nil {
-		log.Fatalf("Failed to listen on %s: %v", *listenAddr, err)
+		log.Fatalf("Invalid --listen address %q: %v", *listenAddr, err)
 	}
-	log.Printf("Implant TLS listener on %s", *listenAddr)
-
-	go func() {
-		for {
-			conn, err := tlsListener.Accept()
-			if err != nil {
-				// Check if listener was closed (shutdown).
-				select {
-				case <-shutdownCh:
-					return
-				default:
-				}
-				log.Printf("Accept error: %v", err)
-				continue
-			}
-			go implantServer.HandleConnection(conn)
-		}
-	}()
+	port, err := strconv.Atoi(bindPort)
+	if err != nil {
+		log.Fatalf("Invalid port in --listen address %q: %v", *listenAddr, err)
+	}
+	defaultListener, err := implantServer.StartListener(c2.ListenerConfig{
+		ID:        "default",
+		Type:      c2.ListenerTypeMTLS,
+		BindAddr:  bindHost,
+		Port:      port,
+		TLSConfig: tlsConfig,
+	})
+	if err != nil {
+		log.Fatalf("Failed to start implant listener: %v", err)
+	}
+	log.Printf("Implant TLS listener on %s", net.JoinHostPort(defaultListener.BindAddr, strconv.Itoa(defaultListener.Port)))
 
 	// --- Operator HTTP API ---
-	apiRouter := httpapi.NewRouter(implantServer, db)
+	apiRouter := httpapi.NewRouter(implantServer, db, tlsConfig)
 	apiServer := &http.Server{
 		Addr:    *apiAddr,
 		Handler: apiRouter,
@@ -119,8 +122,11 @@ func main() {
 	sig := <-sigChan
 	log.Printf("Received signal %v, shutting down", sig)
 
-	close(shutdownCh)
-	tlsListener.Close()
+	for _, ln := range implantServer.Listeners() {
+		if err := implantServer.StopListener(ln.ID); err != nil {
+			log.Printf("Stopping listener %s: %v", ln.ID, err)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -129,7 +135,3 @@ func main() {
 
 	log.Println("Server stopped")
 }
-
-// shutdownCh signals the accept loop to stop.
-var shutdownCh = make(chan struct{})
-

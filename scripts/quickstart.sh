@@ -42,11 +42,13 @@ go build -trimpath -ldflags="-s -w" -o bin/pc2-client ./cmd/client/... && \
     success "bin/pc2-client" || fatal "Client build failed."
 
 info "Cross-compiling implant (linux/amd64)..."
+# The implant entry point is ./cmd/implant; ./implant is a library module with
+# no main package.
 if GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-    -o bin/implant-linux-amd64 ./implant/... 2>&1; then
+    -o bin/implant-linux-amd64 ./cmd/implant; then
     success "bin/implant-linux-amd64"
 else
-    warn "Implant build skipped (no main package yet)."
+    fatal "Implant build failed."
 fi
 
 # ---- Step 2: Generate certificates ----
@@ -64,12 +66,15 @@ fi
 
 # ---- Step 3: Start server ----
 if [[ -x bin/pc2-server ]]; then
-    export PC2_CA_CERT_PATH=certs/ca-cert.pem
-    export PC2_SERVER_CERT_PATH=certs/server-cert.pem
-    export PC2_SERVER_KEY_PATH=certs/server-key.pem
-
+    # The server reads its configuration from flags, not from the PC2_*
+    # environment variables (server/config is not wired into the entry point).
+    # Passing --ca makes the implant listener require a client certificate.
     info "Starting server in the background..."
-    nohup ./bin/pc2-server > /tmp/pc2-server.log 2>&1 &
+    nohup ./bin/pc2-server \
+        --cert certs/server-cert.pem \
+        --key certs/server-key.pem \
+        --ca certs/ca-cert.pem \
+        > /tmp/pc2-server.log 2>&1 &
     SERVER_PID=$!
     sleep 1
 
@@ -90,8 +95,16 @@ echo -e "${BOLD}${CYAN}============================================${NC}"
 echo ""
 echo -e "${BOLD}Deploy the implant to your Kali VM:${NC}"
 echo ""
+echo "  The server requires the implant to present a client certificate, so"
+echo "  copy the CA and the implant certificate alongside the binary."
+echo ""
 echo "  scp bin/implant-linux-amd64 user@kali-vm:/tmp/svc"
-echo "  ssh user@kali-vm 'chmod +x /tmp/svc && /tmp/svc &'"
+echo "  scp certs/ca-cert.pem certs/implant-cert.pem certs/implant-key.pem user@kali-vm:/tmp/"
+echo "  ssh user@kali-vm 'chmod +x /tmp/svc && /tmp/svc \\"
+echo "      --server <this-host>:4444 \\"
+echo "      --ca /tmp/ca-cert.pem \\"
+echo "      --cert /tmp/implant-cert.pem \\"
+echo "      --key /tmp/implant-key.pem &'"
 echo ""
 echo -e "${BOLD}Connect with the operator client:${NC}"
 echo ""

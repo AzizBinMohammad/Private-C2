@@ -2,17 +2,17 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/azizbinmohammad/private-c2/server/c2"
-	"github.com/azizbinmohammad/private-c2/server/store/models"
-	"gorm.io/gorm"
 )
 
+// sessionHandler serves live implant sessions. Sessions are held in memory
+// (docs/decisions.md), so this handler needs no database access.
 type sessionHandler struct {
 	implantServer *c2.ImplantServer
-	db            *gorm.DB
 }
 
 func (sh *sessionHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -59,11 +59,16 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 			}
 			writeJSON(w, http.StatusOK, sess)
 		case http.MethodDelete:
-			if err := sh.db.Where("id = ?", sessionID).Delete(&models.Session{}).Error; err != nil {
-				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			// Live sessions exist only in memory (see docs/decisions.md), so
+			// this must close the connection rather than delete a database row
+			// that was never written. Previously it reported success
+			// regardless, so the portal said "Session killed" while the
+			// implant kept beaconing.
+			if err := sh.implantServer.CloseSession(sessionID); err != nil {
+				writeJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+			writeJSON(w, http.StatusOK, map[string]string{"status": "closed"})
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
 		}
@@ -109,13 +114,14 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "operator is required"})
 			return
 		}
-		res := sh.db.Model(&models.Session{}).Where("id = ?", sessionID).Update("locked_by", body.Operator)
-		if res.Error != nil {
-			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: res.Error.Error()})
-			return
-		}
-		if res.RowsAffected == 0 {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "session not found"})
+		// Locks are held in memory alongside the session they protect; a lock
+		// on a disconnected session would be meaningless.
+		if err := sh.implantServer.LockSession(sessionID, body.Operator); err != nil {
+			if errors.Is(err, c2.ErrSessionNotFound) {
+				writeJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "locked", "locked_by": body.Operator})
@@ -125,13 +131,8 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
 			return
 		}
-		res := sh.db.Model(&models.Session{}).Where("id = ?", sessionID).Update("locked_by", "")
-		if res.Error != nil {
-			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: res.Error.Error()})
-			return
-		}
-		if res.RowsAffected == 0 {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "session not found"})
+		if err := sh.implantServer.UnlockSession(sessionID); err != nil {
+			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "unlocked"})

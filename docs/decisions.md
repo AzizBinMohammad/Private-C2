@@ -53,6 +53,44 @@
 
 ---
 
+## Listeners: Runtime Registry Backed by Sockets, Not Just Rows
+
+* **Decision**: A listener is a running socket owned by `ImplantServer`
+  (`server/c2/listeners.go`). `GET /api/listeners` reports status and
+  `active_connections` from the running listener; the `models.Listener` row is
+  kept as the record of what was configured but is never the source of truth for
+  whether something is up. `POST` binds first and only then records `running`;
+  `DELETE` closes the socket. Only `mtls` is implemented, and requesting any
+  other transport returns 400 rather than a listener that was never bound.
+* **Why**: Listener status was previously a database column nothing backed —
+  creating a listener stored `running` and returned 201 without binding
+  anything, so the portal showed an active listener that could not accept a
+  connection, and `DELETE` removed a row while the socket (had there been one)
+  kept listening. Runtime state must be read from the runtime.
+* **What would conflict with it**: Treating the database row as authoritative
+  would reintroduce the bug. Substituting `server/c2/listener/*` for this path
+  requires changing the implant's wire protocol: those implementations identify
+  sessions by client-certificate CN and dispatch through a request/response data
+  handler, whereas the live path uses server-assigned UUID sessions with a
+  register/checkin/result loop.
+
+---
+
+## Session Locks: Held In Memory Alongside the Session
+
+* **Decision**: A session lock is a `LockedBy` field on the in-memory
+  `ImplantSession`. Locking a session already held by a different operator is
+  rejected with 409. `ListSessions`/`GetSession` return copies so callers cannot
+  mutate live state or race the connection loop.
+* **Why**: The lock previously wrote `models.Session.locked_by`, a row that does
+  not exist for a live session (sessions are in-memory), so the write silently
+  affected zero rows and every lock appeared to succeed. A lock on a
+  disconnected session has no meaning, which is why it belongs with the session.
+* **What would conflict with it**: Persisting locks would require persisting
+  sessions first; see "Session State" above.
+
+---
+
 ## Session State: In-Memory Maps in ImplantServer
 
 * **Decision**: Live implant sessions, task queues, and task results are stored in `sync.RWMutex`-protected Go maps inside `server/c2/handler.go`. They are not persisted to the database.
@@ -182,3 +220,57 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
 * **Decision**: The MCP server (`cmd/mcp/`) is a standalone Go module that wraps the existing HTTP REST API as MCP tools. It communicates with the C2 server over HTTP using bearer token authentication. It does NOT import any internal packages — it is a pure API client.
 * **Why**: Enables Claude Code (AI operator console) to interact with the C2 directly. Using the HTTP API as the integration layer means the MCP server gets all API features for free and does not add coupling to server internals. The stdio transport is the standard for Claude Code MCP servers.
 * **What would conflict with it**: Breaking changes to the HTTP API without updating the MCP server's endpoint calls. Switching the operator API from REST to gRPC would require rewriting the MCP server's HTTP client layer. Adding MCP tools that need functionality not exposed by the HTTP API would require adding new API endpoints first (which benefits all clients, not just MCP).
+
+---
+
+## Operator HTTP Client: Shared `client/api` Package
+
+* **Decision**: Operator-facing interfaces authenticate through a single small
+  HTTP client in `client/api` (`New`, `Login`, `Get`, `Post`, `Delete`,
+  `GetBytes`, plus a `StatusError` carrying the HTTP status and body). It uses
+  only the standard library. `cmd/client` is the first consumer; `cmd/mcp`
+  currently has its own equivalent `c2Client`.
+* **Why**: The CLI previously issued unauthenticated requests — it never called
+  `POST /api/auth/login` and never set an `Authorization` header — so every
+  command returned 401 against the shipped server. Centralising token handling
+  keeps the CLI, the portal and (eventually) the MCP server on one contract
+  instead of three private copies, and makes the auth behaviour testable with
+  `httptest` without a running server.
+* **What would conflict with it**: Adding a framework or an external HTTP client
+  would defeat the stdlib-only constraint. Diverging response shapes per
+  interface would reintroduce the bug class this fixes — the CLI's task polling
+  disagreed with the portal's about when a task is finished, and only the
+  portal's version matched the server. `cmd/mcp` retaining its own client is a
+  known duplication; migrating it is a follow-up, not a conflict.
+
+---
+
+## nmap Port Scanning: Runs on the Target, Not the Teamserver
+
+* **Decision**: The `nmap` task type executes nmap **on the implant's host**, via
+  a new `implant/modules/nmap` package called from the `handleTask` switch in
+  `cmd/implant/main.go`. Availability is checked with `exec.LookPath("nmap")`
+  followed by absolute-path probes (`/usr/bin`, `/usr/local/bin`,
+  `/opt/homebrew/bin`). Arguments are tokenised into separate
+  `exec.CommandContext` argv elements — never `/bin/sh -c`.
+* **Why**: Scanning from the target reaches networks the implant can route to
+  and the teamserver cannot, which is the point of having an implant there.
+  Availability is checked because nmap is usually absent on a target, and the
+  check follows absolute paths as well as `PATH` because an implant started from
+  cron or systemd inherits a minimal `PATH` that can hide an installed binary.
+  Passing argv separately rather than through a shell keeps operator-supplied
+  targets and options from being interpreted as commands. A fixed timeout
+  (`DefaultTimeout`, 3 minutes) bounds the run because `handleTask` executes
+  inline in the implant's **serial** beacon loop: during a scan the implant
+  sends no checkins at all, so the session looks stale and other queued tasks
+  wait.
+* **What would conflict with it**: Wiring an engagement scope into
+  `cmd/implant` (TODO.md Priority 2) would add a pre-execution check this task
+  type currently bypasses — a scan target is validated only for being non-empty,
+  not for being in scope. Running the scan on the teamserver instead would
+  require a new `POST /api/nmap/scan` endpoint and a server-side execution path
+  that the REST API does not have today. Moving the scan off the beacon loop
+  (background execution with a separate result channel) would change the
+  serial-task model in `cmd/implant`. Raising `DefaultTimeout` past
+  `nmapPollTimeout` in `cmd/client` and the portal's `taskPollAttempts` would
+  make a running scan invisible to both interfaces before it finishes.

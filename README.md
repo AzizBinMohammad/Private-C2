@@ -9,7 +9,8 @@ A full-featured Command and Control framework built in Go 1.23 for **authorized 
 - **Cryptography**: XChaCha20-Poly1305 AEAD, X25519 key exchange, Ed25519 signing, ECDSA P-384 PKI
 - **Cross-platform implant**: Windows, Linux, macOS, FreeBSD, OpenBSD, NetBSD across amd64/arm64/386
 - **Build pipeline**: Server-side cross-compilation with configurable features, transports, and obfuscation
-- **RBAC**: admin, operator, ot-operator, builder, observer roles with mTLS client certificate auth
+- **mTLS implant listener**: client certificates are required and verified against the engagement CA
+- **RBAC**: admin, operator, ot-operator, builder, observer roles — defined in `server/api/middleware/rbac.go`, **not yet enforced on the REST API** (see `docs/known-issues.md` #15)
 - **OT/ICS assessment**: 17 industrial protocol clients (Modbus, OPC UA, S7, DNP3, etc.), all strictly read-only
 - **Audit trail**: Append-only with SHA256 hash chaining, exportable as JSON/CEF/LEEF
 - **Compliance**: IEC 62443, NIST SP 800-82, NERC CIP gap analysis
@@ -39,12 +40,36 @@ make docker
 ### Setup Certificates
 
 ```bash
-# Generate CA and server certificates
+# Generate the CA plus the server and implant certificates
 ./scripts/setup-ca.sh
 
 # Add an operator
 ./scripts/add-operator.sh <operator-name>
 ```
+
+`setup-ca.sh` writes three certificate pairs into `certs/`:
+
+| File | Purpose |
+|---|---|
+| `ca-cert.pem` / `ca-key.pem` | Root CA that signs everything else |
+| `server-cert.pem` / `server-key.pem` | Server certificate for the implant listener |
+| `implant-cert.pem` / `implant-key.pem` | Client certificate every implant presents |
+
+Passing `--ca` to the server makes the implant listener **require** a client
+certificate, and the implant must present one:
+
+```bash
+./bin/private-c2-server --cert certs/server-cert.pem --key certs/server-key.pem --ca certs/ca-cert.pem
+
+./bin/implant --server <host>:4444 \
+    --ca certs/ca-cert.pem \
+    --cert certs/implant-cert.pem \
+    --key certs/implant-key.pem
+```
+
+An implant given no `--ca` refuses to start rather than connecting
+unauthenticated; `--insecure` disables server verification explicitly and is
+for development only.
 
 ### Run with Docker
 

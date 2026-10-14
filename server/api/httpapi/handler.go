@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/tls"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -32,7 +33,10 @@ type PendingResponse struct {
 
 var newAuthManagerFn = NewAuthManager
 
-func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB) http.Handler {
+// NewRouter builds the operator API router. listenerTLSConfig is used when an
+// operator starts a new implant listener through POST /api/listeners; pass nil
+// to disable listener creation.
+func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *tls.Config) http.Handler {
 	auth := newAuthManagerFn()
 
 	mux := http.NewServeMux()
@@ -54,7 +58,7 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB) http.Handler {
 
 	// ───────────────── Sessions ─────────────────
 
-	sh := &sessionHandler{implantServer: implantServer, db: db}
+	sh := &sessionHandler{implantServer: implantServer}
 	api.HandleFunc("/api/sessions", sh.handleSessions)
 	api.HandleFunc("/api/sessions/", sh.handleSessionDetail)
 	api.HandleFunc("/api/tasks/", sh.handleTaskResult)
@@ -66,7 +70,7 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB) http.Handler {
 
 	// ───────────────── Listeners ─────────────────
 
-	lh := &listenerHandler{db: db}
+	lh := &listenerHandler{db: db, implantServer: implantServer, tlsConfig: listenerTLSConfig}
 	api.HandleFunc("/api/listeners", lh.handleListeners)
 	api.HandleFunc("/api/listeners/", lh.handleListenerDetail)
 

@@ -200,6 +200,9 @@ Private-C2/
 |   |   |-- network/
 |   |   |   +-- network.go           # ifconfig, netstat, portscan (scope-checked), resolve
 |   |   |
+|   |   |-- nmap/
+|   |   |   +-- nmap.go              # nmap port scan on the target (wired into cmd/implant)
+|   |   |
 |   |   |-- screenshot/
 |   |   |   +-- screenshot.go        # Screen capture (stub)
 |   |   |

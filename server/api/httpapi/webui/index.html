@@ -302,8 +302,8 @@ tr.selected td{background:rgba(59,130,246,.1)}
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th style="width:30px"></th><th>Status</th><th>ID</th><th>Hostname</th><th>User</th><th>OS / Arch</th><th>PID</th><th>Process</th><th>Transport</th><th>Remote IP</th><th>Last Checkin</th></tr></thead>
-          <tbody id="sess-table"><tr><td colspan="11" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
+          <thead><tr><th style="width:30px"></th><th>Status</th><th>ID</th><th>Hostname</th><th>User</th><th>OS / Arch</th><th>PID</th><th>Process</th><th>Transport</th><th>Remote IP</th><th>Locked By</th><th>Last Checkin</th></tr></thead>
+          <tbody id="sess-table"><tr><td colspan="12" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -329,6 +329,7 @@ tr.selected td{background:rgba(59,130,246,.1)}
           <option value="ifconfig">ifconfig</option>
           <option value="netstat">netstat</option>
           <option value="screenshot">screenshot</option>
+          <option value="nmap">nmap</option>
           <option value="portscan">portscan</option>
           <option value="cat">cat</option>
           <option value="mkdir">mkdir</option>
@@ -532,11 +533,37 @@ let sessionInterval, dashboardInterval;
 // ══════════════════════════════════════════
 // XSS-safe text escaping
 // ══════════════════════════════════════════
-const escDiv = document.createElement('div');
+// Quotes must be escaped too: server-supplied values such as engagement and
+// operator names are interpolated into quoted attributes and into inline
+// onclick="fn('...')" handlers, where a bare ' or " would break out of the
+// string and allow stored XSS.
+const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function esc(s) {
   if (s === null || s === undefined) return '';
-  escDiv.textContent = String(s);
-  return escDiv.innerHTML;
+  return String(s).replace(/[&<>"']/g, function (c) { return ESCAPE_MAP[c]; });
+}
+
+// jsArg encodes a value for use as a single-quoted argument inside an inline
+// event handler, e.g. onclick="fn('HERE')".
+//
+// esc() is not sufficient there: the HTML parser decodes &#39; back into a
+// literal ' before the JavaScript parser ever sees the handler, so an escaped
+// quote would still terminate the string literal and allow code injection.
+// The value is therefore JavaScript-escaped first, then HTML-escaped.
+// CR, LF, U+2028 and U+2029 all terminate a JS handler; a bare newline in the
+// regex literal would be invalid source, so the class is built at runtime.
+const LINE_TERMINATORS = new RegExp('[' + String.fromCharCode(13, 10, 8232, 8233) + ']', 'g');
+
+function jsArg(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(LINE_TERMINATORS, '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 // ══════════════════════════════════════════
@@ -634,6 +661,12 @@ function enterApp(user) {
 // API helper
 // ══════════════════════════════════════════
 function apiFetch(path, opts) {
+  return apiFetchRaw(path, opts).then(function(r) { return r.json(); });
+}
+
+// apiFetchRaw returns the raw Response instead of parsing JSON. Use it for
+// binary endpoints such as payload downloads.
+function apiFetchRaw(path, opts) {
   opts = opts || {};
   opts.headers = opts.headers || {};
   opts.headers['Authorization'] = 'Bearer ' + token;
@@ -643,7 +676,7 @@ function apiFetch(path, opts) {
   }
   return fetch(API + path, opts).then(function(r) {
     if (r.status === 401) { doLogout(); throw new Error('Unauthorized'); }
-    return r.json();
+    return r;
   });
 }
 
@@ -846,7 +879,7 @@ function loadDashboard() {
     document.getElementById('server-info').innerHTML =
       '<b>Version:</b><span class="mono">' + esc(d.version) + '</span>' +
       '<b>Uptime:</b><span>' + fmtUptime(d.uptime_seconds) + '</span>' +
-      '<b>Memory:</b><span>' + (d.memory_mb ? d.memory_mb.toFixed(1) + ' MB' : '—') + '</span>' +
+      '<b>Memory:</b><span>' + (d.memory_alloc ? (d.memory_alloc / 1048576).toFixed(1) + ' MB' : '—') + '</span>' +
       '<b>Goroutines:</b><span>' + esc(d.goroutines) + '</span>' +
       '<b>Go Version:</b><span class="mono">' + esc(d.go_version) + '</span>' +
       '<b>Hostname:</b><span>' + esc(d.hostname) + '</span>' +
@@ -944,13 +977,13 @@ function renderSessions() {
 
   var tb = document.getElementById('sess-table');
   if (filtered.length === 0) {
-    tb.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--fg3);padding:40px">' + (sessions.length ? 'No matches' : 'No sessions') + '</td></tr>';
+    tb.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--fg3);padding:40px">' + (sessions.length ? 'No matches' : 'No sessions') + '</td></tr>';
     return;
   }
   tb.innerHTML = filtered.map(function(s) {
     var cls = sessionStatus(s.last_checkin);
     var sel = selectedSession === s.id ? 'selected' : '';
-    return '<tr class="' + sel + '" onclick="selectSession(\'' + esc(s.id) + '\')" ondblclick="interactWith(\'' + esc(s.id) + '\')">' +
+    return '<tr class="' + sel + '" onclick="selectSession(\'' + jsArg(s.id) + '\')" ondblclick="interactWith(\'' + jsArg(s.id) + '\')">' +
       '<td><input type="radio" name="sess" ' + (selectedSession === s.id ? 'checked' : '') + '></td>' +
       '<td><span class="status-dot ' + cls + '"></span>' + esc(cls) + '</td>' +
       '<td class="mono" title="' + esc(s.id) + '" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">' + esc(truncId(s.id)) + '</td>' +
@@ -961,6 +994,7 @@ function renderSessions() {
       '<td>' + esc(s.process || '—') + '</td>' +
       '<td>' + esc(s.transport) + '</td>' +
       '<td class="mono">' + esc(s.remote_addr) + '</td>' +
+      '<td class="mono">' + (s.locked_by ? esc(s.locked_by) : '—') + '</td>' +
       '<td class="mono">' + timeAgo(s.last_checkin) + '</td>' +
     '</tr>';
   }).join('');
@@ -1019,10 +1053,10 @@ function killSelected() {
   if (!selectedSession) { toast('Select a session first', 'error'); return; }
   var s = sessions.find(function(x) { return x.id === selectedSession; });
   var name = s ? s.hostname + ' (' + truncId(s.id) + ')' : truncId(selectedSession);
-  confirmModal('Kill Session', 'Are you sure you want to kill session <b>' + esc(name) + '</b>? This action cannot be undone.', function() {
+  confirmModal('Kill Session', 'Close session <b>' + esc(name) + '</b>?<br><br>The implant\'s connection is terminated. An implant configured to reconnect will dial back in and appear as a new session.', function() {
     apiFetch('/api/sessions/' + selectedSession, { method: 'DELETE' }).then(function(d) {
       if (d.error) { toast(d.error, 'error'); return; }
-      toast('Session killed', 'success');
+      toast('Session closed', 'success');
       selectedSession = null;
       refreshSessions();
     }).catch(function() { toast('Kill failed', 'error'); });
@@ -1046,22 +1080,36 @@ function sendTask() {
   }).then(function(d) {
     if (d.error) { appendTerm('error', d.error); return; }
     appendTerm('info', 'Task ' + truncId(d.task_id) + ' queued, waiting for result...');
-    pollResult(d.task_id);
+    pollResult(d.task_id, 0, taskPollAttempts(type));
   }).catch(function(e) { appendTerm('error', 'Request failed: ' + e.message); });
 }
 
-function pollResult(taskId, attempts) {
+// Poll attempts a task type is given, at 2s each.
+//
+// A scan runs inline in the implant's beacon loop and can take minutes, so it
+// needs a much longer window than the other tasks. This has to outlast the
+// implant's own nmap timeout plus a beacon interval either side.
+function taskPollAttempts(taskType) {
+  return taskType === 'nmap' ? 150 : 60;
+}
+
+function pollResult(taskId, attempts, max) {
   attempts = attempts || 0;
-  if (attempts > 60) { appendTerm('error', 'Task ' + truncId(taskId) + ' timed out.'); return; }
+  max = max || 60;
+  if (attempts > max) { appendTerm('error', 'Task ' + truncId(taskId) + ' timed out.'); return; }
   setTimeout(function() {
     apiFetch('/api/tasks/' + taskId).then(function(d) {
-      if (d.status === 'pending') { pollResult(taskId, attempts + 1); return; }
-      if (d.success) {
-        appendTerm('output', d.output || '(no output)');
-      } else {
+      if (d.status === 'pending') { pollResult(taskId, attempts + 1, max); return; }
+      // Report whatever the task produced before reporting failure. A scan cut
+      // short by the implant's timeout still carries the ports it found, and
+      // dropping that throws away the only useful part of the result.
+      if (d.output) { appendTerm('output', d.output); }
+      if (!d.success) {
         appendTerm('error', d.error || 'Task failed');
+        return;
       }
-    }).catch(function() { pollResult(taskId, attempts + 1); });
+      if (!d.output) { appendTerm('output', '(no output)'); }
+    }).catch(function() { pollResult(taskId, attempts + 1, max); });
   }, 2000);
 }
 
@@ -1161,7 +1209,11 @@ function renderListeners() {
       '<td class="mono">' + esc(truncId(l.engagement_id)) + '</td>' +
       '<td>' + listenerStatusBadge(l.status) + '</td>' +
       '<td>' + esc(l.active_connections != null ? l.active_connections : '—') + '</td>' +
-      '<td><button class="btn danger" style="padding:3px 10px;font-size:11px" onclick="stopListener(\'' + esc(l.id) + '\')">Stop</button></td>' +
+      // Only running listeners can be stopped; offering it for a stopped one
+      // would just produce a 404.
+      '<td>' + (l.status === 'running'
+        ? '<button class="btn danger" style="padding:3px 10px;font-size:11px" onclick="stopListener(\'' + jsArg(l.id) + '\')">Stop</button>'
+        : '<span style="color:var(--fg3)">—</span>') + '</td>' +
     '</tr>';
   }).join('');
 }
@@ -1198,7 +1250,14 @@ function showNewListenerModal() {
 
     openModal(
       '<h2>New Listener</h2>' +
-      '<div class="form-group"><label>Type</label><select id="nl-type"><option value="mtls">mTLS</option><option value="https">HTTPS</option><option value="dns">DNS</option><option value="wireguard">WireGuard</option></select></div>' +
+      // Only mTLS is implemented server-side; the others are listed as
+      // unavailable rather than offered and then rejected.
+      '<div class="form-group"><label>Type</label><select id="nl-type">' +
+        '<option value="mtls">mTLS</option>' +
+        '<option value="https" disabled>HTTPS (not implemented)</option>' +
+        '<option value="dns" disabled>DNS (not implemented)</option>' +
+        '<option value="wireguard" disabled>WireGuard (not implemented)</option>' +
+      '</select></div>' +
       '<div class="form-group"><label>Bind Address</label><input type="text" id="nl-bind" placeholder="0.0.0.0"></div>' +
       '<div class="form-group"><label>Port</label><input type="number" id="nl-port" placeholder="443"></div>' +
       '<div class="form-group"><label>Engagement</label><select id="nl-engagement">' + engOpts + '</select></div>' +
@@ -1212,17 +1271,23 @@ function showNewListenerModal() {
 }
 
 function createListener() {
+  var port = parseInt(document.getElementById('nl-port').value, 10);
+  if (!port || port < 1 || port > 65535) {
+    toast('Enter a port between 1 and 65535', 'error');
+    return;
+  }
   var body = {
     type: document.getElementById('nl-type').value,
     bind_addr: document.getElementById('nl-bind').value || '0.0.0.0',
-    port: parseInt(document.getElementById('nl-port').value) || 443,
-    engagement_id: document.getElementById('nl-engagement').value || undefined,
-    c2_profile_id: document.getElementById('nl-profile').value || undefined
+    port: port,
+    engagement_id: document.getElementById('nl-engagement').value || undefined
   };
   apiFetch('/api/listeners', { method: 'POST', body: body }).then(function(d) {
     if (d.error) { toast(d.error, 'error'); return; }
     closeModal();
-    toast('Listener created', 'success');
+    // The server binds the socket before answering, so reaching here means the
+    // listener is genuinely accepting connections.
+    toast('Listener started on ' + d.bind_addr + ':' + d.port, 'success');
     refreshListeners();
   }).catch(function() { toast('Failed to create listener', 'error'); });
 }
@@ -1271,9 +1336,9 @@ function renderEngagements() {
       '<td style="font-size:11px">' + esc(tw) + '</td>' +
       '<td>' + esc(e.created_by || '—') + '</td>' +
       '<td style="white-space:nowrap">' +
-        '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="useEngagement(\'' + esc(e.id) + '\',\'' + esc(e.name) + '\')">Use</button>' +
-        '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="scopeCheckModal(\'' + esc(e.id) + '\')">Scope</button>' +
-        '<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="killSwitchEngagement(\'' + esc(e.id) + '\',\'' + esc(e.name) + '\')">Kill</button>' +
+        '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="useEngagement(\'' + jsArg(e.id) + '\',\'' + jsArg(e.name) + '\')">Use</button>' +
+        '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="scopeCheckModal(\'' + jsArg(e.id) + '\')">Scope</button>' +
+        '<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="killSwitchEngagement(\'' + jsArg(e.id) + '\',\'' + jsArg(e.name) + '\')">Kill</button>' +
       '</td>' +
     '</tr>';
   }).join('');
@@ -1349,7 +1414,7 @@ function scopeCheckModal(engId) {
     '<div id="sc-result" style="margin-top:12px;display:none"></div>' +
     '<div class="modal-actions">' +
       '<button class="btn" onclick="closeModal()">Close</button>' +
-      '<button class="btn primary" onclick="doScopeCheck(\'' + esc(engId) + '\')">Check</button>' +
+      '<button class="btn primary" onclick="doScopeCheck(\'' + jsArg(engId) + '\')">Check</button>' +
     '</div>'
   );
 }
@@ -1433,7 +1498,7 @@ function renderPayloads() {
       '<td>' + payloadStatusBadge(p.status) + '</td>' +
       '<td class="mono" style="font-size:11px">' + fmtTime(p.created_at) + '</td>' +
       '<td style="white-space:nowrap">' +
-        (p.status === 'active' ? '<a class="btn" style="padding:3px 8px;font-size:11px;text-decoration:none;margin-right:4px" href="/api/payloads/' + esc(p.id) + '/download" target="_blank">Download</a><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="revokePayload(\'' + esc(p.id) + '\')">Revoke</button>' : '') +
+        (p.status === 'active' ? '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="downloadPayload(\'' + jsArg(p.id) + '\',\'' + jsArg(p.target_os) + '\',\'' + jsArg(p.target_arch) + '\')">Download</button><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="revokePayload(\'' + jsArg(p.id) + '\')">Revoke</button>' : '') +
       '</td>' +
     '</tr>';
   }).join('');
@@ -1492,6 +1557,28 @@ function generatePayload() {
   }).catch(function() { toast('Failed to generate payload', 'error'); });
 }
 
+// downloadPayload fetches the artifact with the bearer token and saves it via
+// a blob URL. A plain <a href> cannot be used here: the download route sits
+// behind the auth middleware, and a top-level browser navigation sends no
+// Authorization header.
+function downloadPayload(id, targetOS, targetArch) {
+  var ext = targetOS === 'windows' ? '.exe' : '';
+  apiFetchRaw('/api/payloads/' + id + '/download').then(function(resp) {
+    if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+    return resp.blob();
+  }).then(function(blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'implant-' + (targetOS || 'payload') + '-' + (targetArch || 'amd64') + ext;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    toast('Payload downloaded', 'success');
+  }).catch(function(e) { toast('Download failed: ' + e.message, 'error'); });
+}
+
 function revokePayload(id) {
   confirmModal('Revoke Payload', 'Are you sure you want to revoke payload <b>' + esc(truncId(id)) + '</b>? This will prevent the implant from connecting.', function() {
     apiFetch('/api/payloads/' + id + '/revoke', { method: 'POST' }).then(function(d) {
@@ -1528,7 +1615,7 @@ function renderOperators() {
       '<td>' + (o.mfa_enabled ? '<span class="badge badge-green">Enabled</span>' : '<span class="badge badge-gray">Disabled</span>') + '</td>' +
       '<td class="mono" style="font-size:11px">' + (o.last_active_at ? fmtTime(o.last_active_at) : '—') + '</td>' +
       '<td class="mono">' + esc(o.source_ip || '—') + '</td>' +
-      '<td><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="removeOperator(\'' + esc(o.id) + '\',\'' + esc(o.name) + '\')">Remove</button></td>' +
+      '<td><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="removeOperator(\'' + jsArg(o.id) + '\',\'' + jsArg(o.name) + '\')">Remove</button></td>' +
     '</tr>';
   }).join('');
 }
@@ -1633,13 +1720,13 @@ function verifyAuditChain() {
     if (d.valid) {
       openModal(
         '<h2>Audit Chain Verification</h2>' +
-        '<p class="confirm-text"><span class="badge badge-green" style="font-size:13px;padding:4px 12px">VALID</span><br><br>All <b>' + esc(d.entries_checked) + '</b> audit entries passed integrity verification. The chain is intact.</p>' +
+        '<p class="confirm-text"><span class="badge badge-green" style="font-size:13px;padding:4px 12px">VALID</span><br><br>All <b>' + esc(d.entries) + '</b> audit entries passed integrity verification. The chain is intact.</p>' +
         '<div class="modal-actions"><button class="btn primary" onclick="closeModal()">OK</button></div>'
       );
     } else {
       openModal(
         '<h2>Audit Chain Verification</h2>' +
-        '<p class="confirm-text"><span class="badge badge-red" style="font-size:13px;padding:4px 12px">BROKEN</span><br><br>Integrity check failed. Checked <b>' + esc(d.entries_checked) + '</b> entries.<br>First broken entry: <span class="mono">' + esc(d.first_broken) + '</span></p>' +
+        '<p class="confirm-text"><span class="badge badge-red" style="font-size:13px;padding:4px 12px">BROKEN</span><br><br>Integrity check failed. Checked <b>' + esc(d.entries) + '</b> entries.<br>First broken entry index: <span class="mono">' + esc(d.broken_at_index) + '</span>' + (d.message ? '<br>' + esc(d.message) : '') + '</p>' +
         '<div class="modal-actions"><button class="btn primary" onclick="closeModal()">OK</button></div>'
       );
     }

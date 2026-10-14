@@ -77,10 +77,18 @@ Private-C2/
       metrics.go           # Prometheus metrics registration
 
   client/
+    api/                   # Authenticated HTTP client for the operator REST API
+                           #   (Login/Get/Post/Delete + StatusError). Used by
+                           #   cmd/client; stdlib only.
     cli/commands/          # CLI command definitions: admin, audit, beacons,
                            #   engagement, listeners, ot, payloads, sessions, tasks
+                           #   NOTE: dead code -- every handler is a stub and
+                           #   nothing imports this package. See
+                           #   docs/audit-2026-10-15.md roadmap item 18.
     console/               # Interactive console: REPL loop, context, events, output
+                           #   NOTE: dead code, reachable only from cli/commands.
     transport/             # Client-side gRPC transport with TLS
+                           #   NOTE: dead code stub; the operator API is REST.
 
   implant/
     runtime/               # Implant runtime: config, registration, main loop,
@@ -90,6 +98,9 @@ Private-C2/
       filesystem/          # File operations module
       logs/                # Log collection (platform-specific + timestomping)
       network/             # Network recon module
+      nmap/                # nmap port scanning on the target: availability check
+                           #   (LookPath + absolute-path fallback), argv-separated
+                           #   execution, bounded timeout
       ot/                  # OT/ICS assessment: 17 protocol clients (Modbus, OPC UA,
                            #   S7comm, DNP3, BACnet, IEC 104, IEC 61850, EtherNet/IP,
                            #   PROFINET, FINS, HART, MELSEC, Crimson, PC WORX,
@@ -144,6 +155,7 @@ Private-C2/
   tests/integration/       # Integration test stubs (all t.Skip, 7 test files)
   phases/                  # Development roadmap (8 phase documents)
   scripts/
+    run.sh                 # `make run`: full local stack + attached console
     setup-ca.sh            # Generate CA + server TLS certificates (OpenSSL)
     add-operator.sh        # Generate operator client certificate
     quickstart.sh          # Quick setup script
@@ -160,7 +172,7 @@ Private-C2/
 
 3. **Beacon loop**: the implant sleeps for `interval +/- jitter`, then sends a `checkin` message. The server responds with a `tasking` message containing any queued tasks.
 
-4. **Task execution**: the implant executes tasks (shell, ls, pwd, cd, ps, cat, upload, download), sends `result` messages back. The server stores results in memory (`taskResults` map) and responds with `result_ack`.
+4. **Task execution**: the implant executes tasks (shell, ls, pwd, cd, ps, cat, upload, download, screenshot, nmap), sends `result` messages back. The server stores results in memory (`taskResults` map) and responds with `result_ack`.
 
 5. **Operator CLI** (`cmd/client/main.go`): connects to the HTTP API (`server/api/httpapi/handler.go`), lists sessions via `GET /api/sessions`, submits tasks via `POST /api/sessions/{id}/task`, polls results via `GET /api/tasks/{id}`.
 
@@ -219,6 +231,15 @@ Private-C2/
 
 ## How to Run, Build, and Test
 
+### Run Everything Locally (One Command)
+```bash
+make run                      # or: bash scripts/run.sh
+```
+Builds all four binaries, reuses or generates `certs/`, starts the server and one
+implant, waits for it to register, then hands you the interactive operator
+console already attached to that session. `exit`, Ctrl-D or Ctrl-C shuts the
+whole stack down again. Requires ports 4444 and 8080 free.
+
 ### Build
 ```bash
 make build                    # Build server, client, builder binaries to bin/
@@ -243,12 +264,15 @@ go run ./cmd/server/...
 go run ./cmd/server/... --listen :4444 --api 127.0.0.1:8080 --db pc2.db
 
 # With Docker Compose (PostgreSQL)
-docker-compose up -d
+docker-compose up -d          # broken -- see known-issues #7; use `make run`
 ```
 
 ### Run Operator CLI
 ```bash
 go run ./cmd/client/... --server http://127.0.0.1:8080
+
+# Attach to a specific session on startup (what scripts/run.sh does)
+go run ./cmd/client/... --server http://127.0.0.1:8080 --session <id-prefix>
 ```
 
 ### Run Implant
@@ -269,15 +293,16 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
 ## Known Problem Areas
 
 ### Large Files
-- `server/api/httpapi/handler.go` (1084 lines): monolithic HTTP router with all REST endpoints inlined as closures. Should be split into per-resource handler files.
-- `server/api/httpapi/webui/index.html` (1732 lines): entire web portal in a single embedded HTML file with inline CSS and JavaScript.
-- `cmd/client/main.go` (690 lines): all CLI logic, API helpers, and rendering in one file.
-- `cmd/implant/main.go` (419 lines): full implant logic (TLS, registration, beacon loop, task handlers) in one file, bypassing the structured `implant/` packages.
+- ~~`server/api/httpapi/handler.go` (1084 lines)~~ **RESOLVED**: reduced to route registration; endpoints now live in `sessions.go`, `beacons.go`, `listeners.go`, `engagements.go`, `payloads.go`, `operators.go`, `audit.go`, `ot.go`, `status.go`.
+- `server/api/httpapi/webui/index.html` (~1790 lines): entire web portal in a single embedded HTML file with inline CSS and JavaScript.
+- `cmd/client/main.go` (~650 lines): all CLI logic and rendering in one file. The HTTP/auth layer has been extracted to `client/api`.
+- `cmd/implant/main.go` (362 lines): full implant logic (TLS, registration, beacon loop, task handlers) in one file, bypassing the structured `implant/` packages.
 
 ### Duplicated Logic
-- Wire protocol types (`Message`, `RegisterData`, `CheckinData`, `ResultData`, etc.) are defined independently in `server/c2/handler.go`, `cmd/implant/main.go`, and `cmd/client/main.go`. No shared proto or type package.
-- `buildTLSConfig` is implemented separately in `cmd/server/main.go` and `cmd/implant/main.go`.
+- ~~Wire protocol types defined independently in three places~~ **RESOLVED**: they now live in `pkg/protocol/types.go`.
+- ~~`buildTLSConfig` implemented separately~~ **RESOLVED**: shared via `pkg/tlsutil`.
 - Session models exist both as GORM models (`server/store/models`) and as in-memory structs (`server/c2/handler.go`), with no mapping between them.
+- `cmd/mcp/main.go` has its own authenticated HTTP client (`c2Client`) duplicating `client/api`. Migrating it is a follow-up.
 
 ### Architectural Gaps
 - **`cmd/implant` bypasses `implant/` packages**: the working implant in `cmd/implant/main.go` does not use the structured runtime, safety, transport, or module packages under `implant/`. Those packages exist as well-designed code but are not wired into any entry point.
@@ -293,8 +318,21 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
 ### Security Concerns
 - Default `admin`/`admin` credentials are hardcoded in `auth.go:ensureDefaultUser()`.
 - `Access-Control-Allow-Origin: *` on all API responses (wide-open CORS).
-- Auth tokens stored in memory only; no session invalidation on logout.
+- Auth tokens stored in memory only; no session invalidation on logout; expired tokens are never pruned.
 - OT safety-critical check (`isSafetyCritical`) is a stub returning `false`.
+- ~~mTLS is never enforced~~ **RESOLVED**: the listener now requires and verifies a client certificate when `--ca` is supplied, and the implant refuses to start without a CA unless `--insecure` is passed explicitly. See known-issues R9.
+- **No authorization layer on the REST API** — authentication only. Any authenticated operator can create admin operators, delete operators, and read the audit log. See known-issues #4.
+- Deleting an operator does not revoke credentials (DB row only; bcrypt hash stays in the auth manager).
+
+### Known Issue Tracking
+- `docs/known-issues.md` is the authoritative defect list.
+- `docs/audit-2026-10-15.md` is the full audit: per-phase verification, CLI↔UI feature matrix, and prioritized roadmap.
+- `docs/prompt-template.md` is the template for requesting new features, and lists the project facts worth stating up front (notably: which packages are live vs. unreachable).
+
+### Writing Requirements for New Work
+State **where** a feature must run. Much of this codebase compiles but is never
+executed, so "add OT support to `implant/modules/ot`" can produce working code
+that no binary calls. See `docs/prompt-template.md`.
 
 ## Open Questions
 

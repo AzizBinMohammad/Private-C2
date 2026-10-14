@@ -2,12 +2,15 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/azizbinmohammad/private-c2/pkg/audit"
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
+	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
@@ -49,8 +53,22 @@ func setupTestRouter(t *testing.T) (http.Handler, *c2.ImplantServer, *gorm.DB) {
 		t.Fatalf("migrate: %v", err)
 	}
 	srv := c2.NewImplantServer()
-	router := NewRouter(srv, db)
+	router := NewRouter(srv, db, testListenerTLSConfig(t))
 	return router, srv, db
+}
+
+// testListenerTLSConfig returns a TLS configuration for listeners started by
+// the API during tests, so listener endpoints can bind real sockets.
+func testListenerTLSConfig(t *testing.T) *tls.Config {
+	t.Helper()
+	cert, err := tlsutil.GenerateSelfSigned()
+	if err != nil {
+		t.Fatalf("generate self-signed cert: %v", err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
 }
 
 // getAuthToken logs in as admin/admin and returns the bearer token.
@@ -1101,7 +1119,8 @@ func TestHTTP_CreateListener_Success(t *testing.T) {
 	router, _, _ := setupTestRouter(t)
 	token := getAuthToken(t, router)
 
-	body := `{"type":"https","bind_addr":"0.0.0.0","port":4444}`
+	// Port 0 lets the OS pick a free port; the response reports the real one.
+	body := `{"type":"mtls","bind_addr":"127.0.0.1","port":0}`
 	req := httptest.NewRequest(http.MethodPost, "/api/listeners", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -1111,7 +1130,7 @@ func TestHTTP_CreateListener_Success(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	var listener models.Listener
+	var listener c2.ListenerInfo
 	json.NewDecoder(w.Body).Decode(&listener)
 	if listener.ID == "" {
 		t.Error("listener ID should be set")
@@ -1119,8 +1138,41 @@ func TestHTTP_CreateListener_Success(t *testing.T) {
 	if listener.Status != "running" {
 		t.Errorf("status = %q, want %q", listener.Status, "running")
 	}
-	if listener.Type != "https" {
-		t.Errorf("type = %q, want %q", listener.Type, "https")
+	if listener.Type != "mtls" {
+		t.Errorf("type = %q, want %q", listener.Type, "mtls")
+	}
+	if listener.Port == 0 {
+		t.Error("port = 0, want the port actually bound")
+	}
+}
+
+// TestHTTP_CreateListener_UnsupportedTypeRejected covers the fix for listeners
+// that were never bound: an unimplemented transport must be refused rather
+// than stored as "running".
+func TestHTTP_CreateListener_UnsupportedTypeRejected(t *testing.T) {
+	for _, ltype := range []string{"https", "dns", "wireguard"} {
+		t.Run(ltype, func(t *testing.T) {
+			router, _, db := setupTestRouter(t)
+			token := getAuthToken(t, router)
+
+			body := `{"type":"` + ltype + `","bind_addr":"0.0.0.0","port":4444}`
+			req := httptest.NewRequest(http.MethodPost, "/api/listeners", bytes.NewBufferString(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+
+			// Nothing should have been recorded for a listener that never ran.
+			var count int64
+			db.Model(&models.Listener{}).Count(&count)
+			if count != 0 {
+				t.Errorf("stored %d listener rows for a rejected listener, want 0", count)
+			}
+		})
 	}
 }
 
@@ -1165,14 +1217,15 @@ func TestHTTP_CreateThenListListeners(t *testing.T) {
 	router, _, _ := setupTestRouter(t)
 	token := getAuthToken(t, router)
 
-	body := `{"type":"dns","bind_addr":"0.0.0.0","port":5353}`
+	// Port 0 lets the OS pick a free port; the response reports the real one.
+	body := `{"type":"mtls","bind_addr":"127.0.0.1","port":0}`
 	req := httptest.NewRequest(http.MethodPost, "/api/listeners", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
-		t.Fatalf("create: expected 201, got %d", w.Code)
+		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/listeners", nil)
@@ -1180,13 +1233,59 @@ func TestHTTP_CreateThenListListeners(t *testing.T) {
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	var listeners []models.Listener
+	var listeners []c2.ListenerInfo
 	json.NewDecoder(w.Body).Decode(&listeners)
 	if len(listeners) != 1 {
 		t.Fatalf("expected 1 listener, got %d", len(listeners))
 	}
-	if listeners[0].Type != "dns" {
-		t.Errorf("type = %q, want %q", listeners[0].Type, "dns")
+	if listeners[0].Type != "mtls" {
+		t.Errorf("type = %q, want %q", listeners[0].Type, "mtls")
+	}
+	if listeners[0].Status != "running" {
+		t.Errorf("status = %q, want %q", listeners[0].Status, "running")
+	}
+}
+
+// TestHTTP_DeleteListener_StopsIt covers the second half of the listener fix:
+// deleting a listener must close the socket it was serving.
+func TestHTTP_DeleteListener_StopsIt(t *testing.T) {
+	router, srv, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	body := `{"type":"mtls","bind_addr":"127.0.0.1","port":0}`
+	req := httptest.NewRequest(http.MethodPost, "/api/listeners", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created c2.ListenerInfo
+	json.NewDecoder(w.Body).Decode(&created)
+
+	if _, ok := srv.GetListener(created.ID); !ok {
+		t.Fatal("listener is not running after a successful create")
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/listeners/"+created.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, ok := srv.GetListener(created.ID); ok {
+		t.Error("listener is still running after DELETE; the socket was not closed")
+	}
+
+	// The port must be free again, which proves the socket really closed.
+	ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(created.Port))
+	if err != nil {
+		t.Errorf("port %d is still bound after DELETE: %v", created.Port, err)
+	} else {
+		ln.Close()
 	}
 }
 
@@ -2230,10 +2329,44 @@ func TestHTTP_ServerStatus_Success(t *testing.T) {
 	var status map[string]interface{}
 	json.NewDecoder(w.Body).Decode(&status)
 
-	for _, key := range []string{"version", "uptime_seconds", "active_sessions", "go_version", "goroutines", "memory_alloc", "os", "arch"} {
+	for _, key := range []string{"version", "uptime_seconds", "active_sessions", "go_version", "goroutines", "memory_alloc", "os", "arch", "hostname"} {
 		if _, ok := status[key]; !ok {
 			t.Errorf("missing key %q in status response", key)
 		}
+	}
+}
+
+// TestHTTP_ServerStatus_HostnameIsNonEmpty guards the web portal's server
+// status card, which renders this field. It was previously absent from the
+// response, so the card always showed an empty hostname.
+func TestHTTP_ServerStatus_HostnameIsNonEmpty(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/server/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var status struct {
+		Hostname    string `json:"hostname"`
+		MemoryAlloc uint64 `json:"memory_alloc"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&status); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	want, err := os.Hostname()
+	if err != nil {
+		t.Skipf("os.Hostname unavailable: %v", err)
+	}
+	if status.Hostname != want {
+		t.Errorf("hostname = %q, want %q", status.Hostname, want)
+	}
+	if status.MemoryAlloc == 0 {
+		t.Error("memory_alloc = 0, want a non-zero byte count so the portal can render memory")
 	}
 }
 
@@ -2872,5 +3005,108 @@ func TestHTTP_OT_NoAuth(t *testing.T) {
 		if w.Code != http.StatusUnauthorized {
 			t.Errorf("%s: expected 401, got %d", path, w.Code)
 		}
+	}
+}
+
+// ── Session Control Endpoints (live in-memory sessions) ──
+
+// TestHTTP_DeleteSession_ClosesLiveSession covers the fix for session kill
+// reporting success without acting: it must close the connected implant, not
+// delete a database row that was never written.
+func TestHTTP_DeleteSession_ClosesLiveSession(t *testing.T) {
+	router, srv, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	sessionID, cleanup := registerImplant(t, srv)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sessionID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if srv.GetSession(sessionID) != nil {
+		t.Error("session is still live after DELETE; the handler did not close it")
+	}
+}
+
+func TestHTTP_DeleteSession_UnknownReturns404(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Previously this returned {"status":"deleted"} regardless of whether
+	// anything existed.
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHTTP_LockUnlockSession(t *testing.T) {
+	router, srv, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	sessionID, cleanup := registerImplant(t, srv)
+	defer cleanup()
+
+	lock := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/lock",
+			bytes.NewBufferString(`{"operator":"operator-a"}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := lock(); w.Code != http.StatusOK {
+		t.Fatalf("lock: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := srv.GetSession(sessionID).LockedBy; got != "operator-a" {
+		t.Errorf("LockedBy = %q, want %q", got, "operator-a")
+	}
+
+	// A second operator must not steal the lock.
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/lock",
+		bytes.NewBufferString(`{"operator":"operator-b"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("lock by a second operator: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/unlock", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unlock: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := srv.GetSession(sessionID).LockedBy; got != "" {
+		t.Errorf("LockedBy = %q, want empty after unlock", got)
+	}
+}
+
+// TestHTTP_LockSession_UnknownReturns404 guards the previous behaviour where
+// lock/unlock hit a database row that never existed for a live session.
+func TestHTTP_LockSession_UnknownReturns404(t *testing.T) {
+	router, _, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/nonexistent/lock",
+		bytes.NewBufferString(`{"operator":"operator-a"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }

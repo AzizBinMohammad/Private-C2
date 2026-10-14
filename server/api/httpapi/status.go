@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"os"
 	"runtime"
 	"time"
 
@@ -31,6 +32,12 @@ func (st *statusHandler) handleServerStatus(w http.ResponseWriter, r *http.Reque
 
 	activeSessions := len(st.implantServer.ListSessions())
 
+	// Best-effort: the portal displays this on the server status card.
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = ""
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"version":         "0.1.0",
 		"uptime_seconds":  int(time.Since(serverStartTime).Seconds()),
@@ -40,5 +47,6 @@ func (st *statusHandler) handleServerStatus(w http.ResponseWriter, r *http.Reque
 		"memory_alloc":    memStats.Alloc,
 		"os":              runtime.GOOS,
 		"arch":            runtime.GOARCH,
+		"hostname":        hostname,
 	})
 }

@@ -108,10 +108,60 @@ EOF
     info "Server private key : ${SERVER_KEY}"
 fi
 
+# ---- Implant client certificate ----
+#
+# The server requires a client certificate on the implant listener whenever a
+# CA is configured (tlsutil.ServerTLSConfig), so every implant needs one. The
+# same pair can be embedded in any number of implants for an engagement; use
+# add-operator.sh for per-operator certificates on the operator API side.
+IMPLANT_KEY="${OUT_DIR}/implant-key.pem"
+IMPLANT_CSR="${OUT_DIR}/implant.csr"
+IMPLANT_CERT="${OUT_DIR}/implant-cert.pem"
+IMPLANT_EXT="${OUT_DIR}/implant-ext.cnf"
+
+if [[ -f "${IMPLANT_KEY}" || -f "${IMPLANT_CERT}" ]]; then
+    warn "Implant cert files already exist in ${OUT_DIR}, skipping implant cert generation"
+else
+    info "Generating implant client key (${KEY_BITS}-bit RSA)"
+    openssl genrsa -out "${IMPLANT_KEY}" "${KEY_BITS}" 2>/dev/null
+
+    info "Creating implant CSR"
+    openssl req -new \
+        -key "${IMPLANT_KEY}" \
+        -out "${IMPLANT_CSR}" \
+        -subj "/CN=private-c2-implant/O=Private-C2"
+
+    cat > "${IMPLANT_EXT}" <<EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+EOF
+
+    info "Signing implant client certificate with CA (valid ${SERVER_DAYS} days)"
+    openssl x509 -req \
+        -in "${IMPLANT_CSR}" \
+        -CA "${CA_CERT}" \
+        -CAkey "${CA_KEY}" \
+        -CAcreateserial \
+        -out "${IMPLANT_CERT}" \
+        -days "${SERVER_DAYS}" \
+        -sha256 \
+        -extfile "${IMPLANT_EXT}"
+
+    chmod 600 "${IMPLANT_KEY}"
+    chmod 644 "${IMPLANT_CERT}"
+
+    rm -f "${IMPLANT_CSR}" "${IMPLANT_EXT}" "${OUT_DIR}/ca-cert.srl"
+
+    info "Implant certificate : ${IMPLANT_CERT}"
+    info "Implant private key : ${IMPLANT_KEY}"
+fi
+
 # ---- Print summary ----
 echo ""
 echo "============================================="
-echo "  CA and server certificates are ready"
+echo "  CA, server and implant certificates are ready"
 echo "  Output directory: ${OUT_DIR}"
 echo "============================================="
 echo ""
@@ -122,6 +172,13 @@ echo "Environment variables for the server:"
 echo "  export PC2_CA_CERT_PATH=${CA_CERT}"
 echo "  export PC2_SERVER_CERT_PATH=${SERVER_CERT}"
 echo "  export PC2_SERVER_KEY_PATH=${SERVER_KEY}"
+echo ""
+echo "Server flags (equivalent to the above):"
+echo "  --cert ${SERVER_CERT} --key ${SERVER_KEY} --ca ${CA_CERT}"
+echo "  Passing --ca makes the listener require a client certificate."
+echo ""
+echo "Implant flags:"
+echo "  --ca ${CA_CERT} --cert ${IMPLANT_CERT} --key ${IMPLANT_KEY}"
 echo ""
 echo "Next: run ./scripts/add-operator.sh <operator-name> to generate"
 echo "      an operator client certificate."

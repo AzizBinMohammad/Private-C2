@@ -10,12 +10,14 @@ SERVER_BIN  := $(BIN_DIR)/private-c2-server
 CLIENT_BIN  := $(BIN_DIR)/private-c2-client
 BUILDER_BIN := $(BIN_DIR)/private-c2-builder
 
-IMPLANT_SRC := ./implant
+# The implant entry point lives in cmd/implant; ./implant is a library module
+# with no main package and will not build on its own.
+IMPLANT_SRC := ./cmd/implant
 IMPLANT_BIN := $(BIN_DIR)/implant
 
 DOCKER_TAG  ?= private-c2:latest
 
-.PHONY: all build server client builder test test-integration lint proto docker clean cross-compile help
+.PHONY: all build server client builder run test test-integration lint proto docker clean cross-compile help
 
 all: build
 
@@ -35,10 +37,21 @@ builder:  ## Build the builder binary
 	@mkdir -p $(BIN_DIR)
 	$(GO) build $(GOFLAGS) -trimpath -ldflags="-s -w" -o $(BUILDER_BIN) ./cmd/builder
 
+# ---- Run -----------------------------------------------------------------
+
+run:  ## Build everything and launch the full local stack + operator console
+	@bash scripts/run.sh
+
 # ---- Test -----------------------------------------------------------------
 
+# Every workspace module. cmd/* modules are listed individually because
+# "go test ./cmd/..." does not resolve in a go.work workspace (cmd itself is
+# not a module).
+TEST_PKGS := ./pkg/... ./server/... ./client/... ./implant/... \
+	./cmd/server/... ./cmd/client/... ./cmd/implant/... ./cmd/builder/... ./cmd/mcp/...
+
 test:  ## Run all unit tests
-	$(GO) test ./pkg/... ./server/... ./client/... -count=1 -race -timeout 120s
+	$(GO) test $(TEST_PKGS) -count=1 -race -timeout 300s
 
 test-integration:  ## Run integration tests (requires full stack)
 	cd tests && $(GO) test -tags integration -count=1 -race -timeout 300s ./integration/...
@@ -46,9 +59,9 @@ test-integration:  ## Run integration tests (requires full stack)
 # ---- Lint -----------------------------------------------------------------
 
 lint:  ## Run go vet; use golangci-lint if available
-	$(GO) vet ./pkg/... ./server/... ./client/...
+	$(GO) vet $(TEST_PKGS)
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./pkg/... ./server/... ./client/...; \
+		golangci-lint run $(TEST_PKGS); \
 	else \
 		echo "golangci-lint not found, skipping (go vet passed)"; \
 	fi

@@ -498,3 +498,158 @@ func TestConcurrentQueueTask(t *testing.T) {
 
 	clientConn.Close()
 }
+
+// ── Session control ──
+
+// connectedSession starts an ImplantServer with one registered session and
+// returns the server, the session ID and a cleanup func.
+func connectedSession(t *testing.T) (srv *ImplantServer, sessionID string, client net.Conn, done chan struct{}) {
+	t.Helper()
+	srv = NewImplantServer()
+	serverConn, clientConn := net.Pipe()
+
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.HandleConnection(serverConn)
+	}()
+
+	sessionID = register(t, clientConn)
+	return srv, sessionID, clientConn, done
+}
+
+func TestCloseSession_RemovesSessionAndClosesConnection(t *testing.T) {
+	srv, sessionID, client, done := connectedSession(t)
+	defer client.Close()
+
+	if err := srv.CloseSession(sessionID); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+
+	if srv.GetSession(sessionID) != nil {
+		t.Error("session still present after CloseSession")
+	}
+	if n := len(srv.ListSessions()); n != 0 {
+		t.Errorf("ListSessions returned %d, want 0", n)
+	}
+
+	// The connection must be closed, which is what makes the implant's read
+	// loop fail and the session actually end.
+	client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := envelope.ReadFrame(client); err == nil {
+		t.Error("connection still readable after CloseSession")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Error("HandleConnection did not return after CloseSession")
+	}
+}
+
+func TestCloseSession_UnknownSession(t *testing.T) {
+	srv := NewImplantServer()
+	if err := srv.CloseSession("does-not-exist"); err != ErrSessionNotFound {
+		t.Errorf("CloseSession(unknown) = %v, want ErrSessionNotFound", err)
+	}
+}
+
+// TestCloseSession_ReapsTaskQueueAndResults guards the memory leak: queues and
+// results used to outlive the session for the lifetime of the process.
+func TestCloseSession_ReapsTaskQueueAndResults(t *testing.T) {
+	srv, sessionID, client, _ := connectedSession(t)
+	defer client.Close()
+
+	taskID, err := srv.QueueTask(sessionID, "shell", "whoami")
+	if err != nil {
+		t.Fatalf("QueueTask: %v", err)
+	}
+
+	// Deliver a result directly, as the implant would.
+	srv.mu.Lock()
+	srv.taskResults[taskID] = &TaskResult{TaskID: taskID, SessionID: sessionID, Success: true}
+	srv.mu.Unlock()
+
+	if err := srv.CloseSession(sessionID); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+
+	srv.mu.RLock()
+	defer srv.mu.RUnlock()
+	if _, ok := srv.taskQueues[sessionID]; ok {
+		t.Error("task queue for the closed session was not reaped")
+	}
+	if _, ok := srv.taskResults[taskID]; ok {
+		t.Error("task result for the closed session was not reaped")
+	}
+}
+
+func TestLockSession_SetsAndClearsLock(t *testing.T) {
+	srv, sessionID, client, _ := connectedSession(t)
+	defer client.Close()
+
+	if err := srv.LockSession(sessionID, "operator-a"); err != nil {
+		t.Fatalf("LockSession: %v", err)
+	}
+	if got := srv.GetSession(sessionID).LockedBy; got != "operator-a" {
+		t.Errorf("LockedBy = %q, want %q", got, "operator-a")
+	}
+
+	// Re-locking by the same operator is a no-op, not an error.
+	if err := srv.LockSession(sessionID, "operator-a"); err != nil {
+		t.Errorf("re-lock by the same operator: %v", err)
+	}
+
+	if err := srv.UnlockSession(sessionID); err != nil {
+		t.Fatalf("UnlockSession: %v", err)
+	}
+	if got := srv.GetSession(sessionID).LockedBy; got != "" {
+		t.Errorf("LockedBy = %q, want empty after unlock", got)
+	}
+}
+
+func TestLockSession_HeldByAnotherOperatorIsRejected(t *testing.T) {
+	srv, sessionID, client, _ := connectedSession(t)
+	defer client.Close()
+
+	if err := srv.LockSession(sessionID, "operator-a"); err != nil {
+		t.Fatalf("LockSession: %v", err)
+	}
+	err := srv.LockSession(sessionID, "operator-b")
+	if err == nil {
+		t.Fatal("expected an error when locking a session held by another operator")
+	}
+	if got := srv.GetSession(sessionID).LockedBy; got != "operator-a" {
+		t.Errorf("LockedBy = %q, want the original holder %q", got, "operator-a")
+	}
+}
+
+func TestLockUnlock_UnknownSession(t *testing.T) {
+	srv := NewImplantServer()
+	if err := srv.LockSession("nope", "op"); err != ErrSessionNotFound {
+		t.Errorf("LockSession(unknown) = %v, want ErrSessionNotFound", err)
+	}
+	if err := srv.UnlockSession("nope"); err != ErrSessionNotFound {
+		t.Errorf("UnlockSession(unknown) = %v, want ErrSessionNotFound", err)
+	}
+}
+
+// TestListSessions_ReturnsCopies guards against the data race where callers
+// marshalled a live session to JSON outside the server lock while the
+// connection loop kept writing LastCheckin.
+func TestListSessions_ReturnsCopies(t *testing.T) {
+	srv, sessionID, client, _ := connectedSession(t)
+	defer client.Close()
+
+	first := srv.GetSession(sessionID)
+	second := srv.GetSession(sessionID)
+	if first == second {
+		t.Fatal("GetSession returned the same pointer twice; callers would race with the connection loop")
+	}
+
+	// Mutating the returned copy must not affect the live session.
+	first.Hostname = "tampered"
+	if got := srv.GetSession(sessionID).Hostname; got == "tampered" {
+		t.Error("mutating the returned copy changed live session state")
+	}
+}

@@ -39,7 +39,7 @@ graph TD
         IMP_TASK["implant/task<br/>executor.go, registry.go"]
         IMP_TRANSPORT["implant/transport<br/>transport.go, manager.go"]
         IMP_TRANSPORT_IMPL["implant/transport/<br/>mtls, https, dns,<br/>wireguard, pivot"]
-        IMP_MODULES["implant/modules<br/>shell, filesystem, process,<br/>network, screenshot, logs"]
+        IMP_MODULES["implant/modules<br/>shell, filesystem, process,<br/>network, nmap, screenshot, logs"]
         IMP_OT["implant/modules/ot<br/>ot.go + 17 protocols"]
         IMP_EVASION["implant/evasion<br/>stealth, syscalls"]
     end
@@ -269,7 +269,7 @@ graph TD
 
 - **Job**: Task dispatch with concurrency limits (semaphore), timeouts, and result buffering for beacon mode. Registry pattern for handler functions.
 - **Task types defined**: shell, upload, download, ls, ps, ifconfig, screenshot, kill, cat, mkdir, rm, cp, mv, pwd, cd, netstat, portscan, resolve.
-- **Note**: **Not used** by `cmd/implant/main.go`, which has its own inline `handleTask` switch statement supporting a subset (shell, ls, pwd, cd, ps, cat, upload, download).
+- **Note**: **Not used** by `cmd/implant/main.go`, which has its own inline `handleTask` switch statement supporting a subset (shell, ls, pwd, cd, ps, cat, upload, download, screenshot, nmap).
 
 ### `implant/transport` (Transport Library)
 
