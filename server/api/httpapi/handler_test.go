@@ -1094,6 +1094,93 @@ func TestHTTP_ListBeacons_NoAuth(t *testing.T) {
 	}
 }
 
+// TestHTTP_ListBeacons_IncludesLiveSessions covers the fix for the portal's
+// Beacons panel rendering empty while an implant was connected and checking in.
+//
+// Nothing in the running server writes the beacons table, so the endpoint used
+// to answer [] unconditionally and the panel had nothing to show.
+func TestHTTP_ListBeacons_IncludesLiveSessions(t *testing.T) {
+	router, srv, _ := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	sessionID, cleanup := registerImplant(t, srv)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/beacons", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var beacons []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&beacons); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(beacons) != 1 {
+		t.Fatalf("expected 1 beacon for the live session, got %d", len(beacons))
+	}
+
+	got := beacons[0]
+	if got["id"] != sessionID {
+		t.Errorf("id = %v, want the live session id %s", got["id"], sessionID)
+	}
+	if got["hostname"] != "test-host" {
+		t.Errorf("hostname = %v, want test-host", got["hostname"])
+	}
+	if got["implant_id"] != "test-implant" {
+		t.Errorf("implant_id = %v, want test-implant", got["implant_id"])
+	}
+	// The server is never told the implant's beacon cadence (register_ack's
+	// Interval is ignored by cmd/implant), so reporting one would be inventing
+	// a value. The portal shows an em dash when it is absent.
+	if _, ok := got["interval_ms"]; ok {
+		t.Errorf("interval_ms = %v, want absent: the server does not know the cadence", got["interval_ms"])
+	}
+}
+
+// TestHTTP_ListBeacons_LiveSessionWinsOverPersistedRow pins the merge rule.
+//
+// The two sources can describe the same implant once beacons are persisted
+// (TODO.md). It must be listed once, and the live session -- which has the
+// current checkin -- is the copy worth showing.
+func TestHTTP_ListBeacons_LiveSessionWinsOverPersistedRow(t *testing.T) {
+	router, srv, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	sessionID, cleanup := registerImplant(t, srv)
+	defer cleanup()
+
+	if err := db.Create(&models.Beacon{
+		ImplantID: "test-implant",
+		Hostname:  "stale-host",
+		OS:        "linux",
+		Arch:      "amd64",
+	}).Error; err != nil {
+		t.Fatalf("seed beacon row: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/beacons", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var beacons []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&beacons); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(beacons) != 1 {
+		t.Fatalf("expected the implant to be listed once, got %d entries", len(beacons))
+	}
+	if beacons[0]["id"] != sessionID {
+		t.Errorf("id = %v, want the live session %s to take precedence", beacons[0]["id"], sessionID)
+	}
+	if beacons[0]["hostname"] != "test-host" {
+		t.Errorf("hostname = %v, want the live host, not the stale row", beacons[0]["hostname"])
+	}
+}
+
 // ── Listener Endpoints ──
 
 func TestHTTP_ListListeners_Empty(t *testing.T) {

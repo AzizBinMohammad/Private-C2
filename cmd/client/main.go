@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -55,6 +56,62 @@ type TaskResult struct {
 	Success bool   `json:"success"`
 	Output  string `json:"output"`
 	Error   string `json:"error"`
+}
+
+// ScanRequest mirrors the implant's nmap.Request. Target, profile and ports
+// travel as JSON so none can be mistaken for another, or for an nmap option.
+type ScanRequest struct {
+	Target  string `json:"target"`
+	Profile string `json:"profile,omitempty"`
+	Ports   string `json:"ports,omitempty"`
+}
+
+// ScanResult mirrors the implant's nmap.Result, which arrives inside the task's
+// Output field as JSON.
+type ScanResult struct {
+	Target   string        `json:"target"`
+	Profile  string        `json:"profile"`
+	Ports    string        `json:"ports"`
+	Elapsed  string        `json:"elapsed"`
+	Hosts    []ScanHost    `json:"hosts"`
+	Services []ScanService `json:"services"`
+	Findings []ScanFinding `json:"findings"`
+	Partial  bool          `json:"partial"`
+	Notice   string        `json:"notice"`
+	Raw      string        `json:"raw"`
+}
+
+// ScanHost is one host the scan reported on.
+type ScanHost struct {
+	Address  string `json:"address"`
+	Hostname string `json:"hostname"`
+	State    string `json:"state"`
+}
+
+// ScanService is one port, with whatever version detail the profile gathered.
+type ScanService struct {
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Protocol  string `json:"protocol"`
+	State     string `json:"state"`
+	Name      string `json:"name"`
+	Product   string `json:"product"`
+	Version   string `json:"version"`
+	ExtraInfo string `json:"extra_info"`
+	CPE       string `json:"cpe"`
+}
+
+// ScanFinding is one NSE script result. There is no severity: nmap's XML
+// carries none, so Vulnerable records only what the script's own output stated
+// and CVEs lists the identifiers it actually named.
+type ScanFinding struct {
+	Host       string   `json:"host"`
+	Port       int      `json:"port"`
+	Protocol   string   `json:"protocol"`
+	ScriptID   string   `json:"script_id"`
+	Vulnerable bool     `json:"vulnerable"`
+	CVEs       []string `json:"cves"`
+	Output     string   `json:"output"`
 }
 
 func main() {
@@ -240,6 +297,17 @@ func main() {
 			// target whether nmap is installed there.
 			cmdTask(client, activeSession.ID, "nmap", strings.Join(args, " "))
 
+		case "scan":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: scan <target> [--quick|--services|--vulns]")
+				continue
+			}
+			cmdScan(client, activeSession.ID, args)
+
 		case "back":
 			if activeSession != nil {
 				printInfo("Session deselected.")
@@ -364,6 +432,7 @@ func printHelp() {
 		{"upload <local> <remote>", "Upload a local file to the target"},
 		{"download <remote> [local]", "Download a file from the target"},
 		{"nmap [target] [opts]", "Run nmap on the target (no args = check nmap is installed)"},
+		{"scan <target> [opts]", "Scan a target: services and vulnerabilities (--quick|--services|--vulns, --ports 80,443)"},
 		{"", ""},
 		{"help", "Show this help message"},
 		{"exit, quit", "Exit the console"},
@@ -547,13 +616,26 @@ const taskPollTimeout = 30 * time.Second
 // back on the checkin after it finishes.
 const nmapPollTimeout = 5 * time.Minute
 
+// scanPollTimeout bounds the wait for a structured scan. It has to outlast the
+// longest scan profile -- "vulns" gets 7 minutes in implant/modules/nmap, which
+// itself is sized around nmap's 4-minute --host-timeout plus the script phase --
+// and then allow a beacon interval on either side, since the scan runs inline in
+// the implant's beacon loop and its result only returns on the checkin after it
+// finishes.
+const scanPollTimeout = 9 * time.Minute
+
 // taskPollTimeoutFor returns how long to wait for a task of the given type.
-// Only scans get the long window; every other task keeps the short one.
+// Only the two scan types get a long window; every other task keeps the short
+// one, so a hung shell command still reports promptly.
 func taskPollTimeoutFor(taskType string) time.Duration {
-	if taskType == "nmap" {
+	switch taskType {
+	case "nmap":
 		return nmapPollTimeout
+	case "scan":
+		return scanPollTimeout
+	default:
+		return taskPollTimeout
 	}
-	return taskPollTimeout
 }
 
 // isTaskPending reports whether a task result represents an unfinished task.
@@ -567,8 +649,20 @@ func isTaskPending(result *TaskResult) bool {
 	return result.Status == "pending"
 }
 
-// cmdTask submits a task and polls until completion.
+// cmdTask submits a task and polls until completion, then renders its output.
 func cmdTask(client *api.Client, sessionID string, taskType string, taskArgs string) {
+	result, ok := submitAndPoll(client, sessionID, taskType, taskArgs)
+	if !ok {
+		return
+	}
+	renderTaskResult(result)
+}
+
+// submitAndPoll queues a task and waits for its result, so callers that render
+// the raw output differently (see cmdScan) can share the submit/poll path.
+// It returns ok=false when the task could not be queued or did not finish in
+// time; in both cases the error has already been printed.
+func submitAndPoll(client *api.Client, sessionID string, taskType string, taskArgs string) (*TaskResult, bool) {
 	req := TaskRequest{
 		Type: taskType,
 		Args: taskArgs,
@@ -577,16 +671,12 @@ func cmdTask(client *api.Client, sessionID string, taskType string, taskArgs str
 	var resp TaskResponse
 	if err := client.Post("/api/sessions/"+sessionID+"/task", req, &resp); err != nil {
 		printError(fmt.Sprintf("Failed to submit task: %v", err))
-		return
+		return nil, false
 	}
 
 	printInfo(fmt.Sprintf("Task submitted: %s", resp.TaskID))
 
-	result, ok := pollTask(client, resp.TaskID, taskPollTimeoutFor(taskType))
-	if !ok {
-		return
-	}
-	renderTaskResult(result)
+	return pollTask(client, resp.TaskID, taskPollTimeoutFor(taskType))
 }
 
 // pollTask polls /api/tasks/{id} until the task finishes or the timeout
@@ -636,6 +726,274 @@ func renderTaskResult(result *TaskResult) {
 	if result.Output == "" {
 		printSuccess("Task completed (no output).")
 	}
+}
+
+// scanProfileNames maps the CLI's profile flags onto the implant's names.
+var scanProfileNames = map[string]string{
+	"--quick":    "quick",
+	"-q":         "quick",
+	"--services": "services",
+	"-s":         "services",
+	"--vulns":    "vulns",
+	"-v":         "vulns",
+}
+
+// scanOptions is the parsed form of
+// "scan <target> [--quick|--services|--vulns] [--ports <list>]".
+type scanOptions struct {
+	Target  string
+	Profile string
+	Ports   string
+}
+
+// parseScanArgs splits the scan command's arguments. An empty profile is left
+// empty so the implant applies its own default rather than the console deciding
+// what the default scan is.
+func parseScanArgs(args []string) (scanOptions, error) {
+	var opts scanOptions
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+
+		if name, ok := scanProfileNames[a]; ok {
+			if opts.Profile != "" && opts.Profile != name {
+				return scanOptions{}, fmt.Errorf("pick one scan profile, not both %s and %s", opts.Profile, name)
+			}
+			opts.Profile = name
+			continue
+		}
+
+		if a == "--ports" || a == "-p" {
+			if i+1 >= len(args) {
+				return scanOptions{}, fmt.Errorf("%s needs a port list, e.g. %s 80,443", a, a)
+			}
+			i++
+			opts.Ports = args[i]
+			continue
+		}
+
+		if strings.HasPrefix(a, "-") {
+			return scanOptions{}, fmt.Errorf("unknown scan option %q", a)
+		}
+		if opts.Target != "" {
+			return scanOptions{}, fmt.Errorf("scan takes one target, got %q and %q", opts.Target, a)
+		}
+		opts.Target = a
+	}
+
+	if opts.Target == "" {
+		return scanOptions{}, fmt.Errorf("scan needs a target")
+	}
+	return opts, nil
+}
+
+// cmdScan runs the structured scanner and renders services and findings as
+// tables, rather than dumping the task output the way cmdTask would.
+func cmdScan(client *api.Client, sessionID string, args []string) {
+	opts, err := parseScanArgs(args)
+	if err != nil {
+		printError(err.Error())
+		printInfo("Usage: scan <target> [--quick|--services|--vulns] [--ports 80,443]")
+		return
+	}
+
+	// NSE vulnerability scripts actively probe the service they test and can
+	// crash or wedge it, so say so before running them rather than after.
+	if opts.Profile == "vulns" {
+		printWarning("The vulns profile runs nmap's vulnerability scripts; those actively probe the target and can disrupt the service being tested.")
+	}
+
+	payload, err := json.Marshal(ScanRequest{Target: opts.Target, Profile: opts.Profile, Ports: opts.Ports})
+	if err != nil {
+		printError(fmt.Sprintf("Failed to encode scan request: %v", err))
+		return
+	}
+
+	result, ok := submitAndPoll(client, sessionID, "scan", string(payload))
+	if !ok {
+		return
+	}
+	renderScanResult(result)
+}
+
+// renderScanResult renders a structured scan.
+//
+// The scan task returns its JSON even when it failed, because a scan cut short
+// at its deadline still found what it found. So the JSON is rendered first and
+// the failure reported afterwards, rather than discarding the findings.
+func renderScanResult(result *TaskResult) {
+	var scan ScanResult
+	if result.Output == "" || json.Unmarshal([]byte(result.Output), &scan) != nil {
+		// Not a structured result (an older implant, or a non-scan task).
+		// Fall back to the generic renderer so nothing is lost.
+		renderTaskResult(result)
+		return
+	}
+
+	printScanResult(&scan)
+
+	if !result.Success {
+		printError(fmt.Sprintf("Task failed: %s", result.Error))
+	}
+}
+
+func printScanResult(scan *ScanResult) {
+	header := fmt.Sprintf("Scan of %s", scan.Target)
+	if scan.Profile != "" {
+		header += " (" + scan.Profile + ")"
+	}
+	if scan.Ports != "" {
+		header += " ports " + scan.Ports
+	}
+	if scan.Elapsed != "" {
+		header += " -- " + scan.Elapsed + "s"
+	}
+	fmt.Printf("\n%s%s%s\n", colorBold, header, colorReset)
+
+	// When nmap's XML could not be parsed there is nothing structured to show,
+	// and printing an empty result would look like a scan that found nothing.
+	if len(scan.Services) == 0 && len(scan.Findings) == 0 && scan.Raw != "" {
+		printWarning(scan.Notice)
+		fmt.Print(truncateRaw(scan.Raw))
+		return
+	}
+
+	printServiceTable(scan.Services)
+	printFindings(scan.Findings)
+
+	if scan.Notice != "" {
+		printWarning(scan.Notice)
+	}
+}
+
+func printServiceTable(services []ScanService) {
+	fmt.Printf("\n%sSERVICES (%d)%s\n", colorCyan, len(services), colorReset)
+	if len(services) == 0 {
+		printInfo("No ports reported.")
+		return
+	}
+
+	fmt.Printf("%s  %-10s %-9s %-16s %s%s\n", colorDim, "PORT", "STATE", "SERVICE", "VERSION", colorReset)
+	for _, s := range services {
+		// Closed ports are listed too, so "checked and nothing there" stays
+		// distinguishable from "never checked".
+		line := fmt.Sprintf("  %-10s %-9s %-16s %s",
+			fmt.Sprintf("%d/%s", s.Port, s.Protocol), s.State, truncate(s.Name, 16), serviceVersion(&s))
+		if s.State == "open" {
+			fmt.Printf("%s%s%s\n", colorGreen, line, colorReset)
+		} else {
+			fmt.Printf("%s%s%s\n", colorDim, line, colorReset)
+		}
+	}
+}
+
+// rawOutputLimit caps how much unparsed nmap output is printed.
+//
+// Raw output only appears when nothing could be decoded, and that happens most
+// often with a scan cut short at its deadline -- where the partial document can
+// still be tens of kilobytes, most of it a single <scaninfo> attribute listing
+// every port scanned. Dumping that buries the one line worth reading.
+const rawOutputLimit = 4000
+
+func truncateRaw(raw string) string {
+	if len(raw) <= rawOutputLimit {
+		if strings.HasSuffix(raw, "\n") {
+			return raw
+		}
+		return raw + "\n"
+	}
+	return raw[:rawOutputLimit] + fmt.Sprintf("\n... [%d more bytes of raw output omitted]\n", len(raw)-rawOutputLimit)
+}
+
+// serviceVersion joins the version detail nmap gathered, skipping what it did
+// not detect rather than printing empty columns.
+func serviceVersion(s *ScanService) string {
+	var parts []string
+	if s.Product != "" {
+		parts = append(parts, s.Product)
+	}
+	if s.Version != "" {
+		parts = append(parts, s.Version)
+	}
+	if s.ExtraInfo != "" {
+		parts = append(parts, "("+s.ExtraInfo+")")
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+// maxCVEsShown caps how many identifiers are printed for a single finding.
+//
+// An NSE script that matches the detected version against a CVE list can name a
+// hundred of them; printing them all buries every other finding on the screen.
+const maxCVEsShown = 8
+
+func printFindings(findings []ScanFinding) {
+	vulnerable, withCVEs := 0, 0
+	for _, f := range findings {
+		if f.Vulnerable {
+			vulnerable++
+		}
+		if len(f.CVEs) > 0 {
+			withCVEs++
+		}
+	}
+
+	fmt.Printf("\n%sFINDINGS (%d script result(s): %d reported VULNERABLE, %d named CVE identifiers)%s\n",
+		colorCyan, len(findings), vulnerable, withCVEs, colorReset)
+	if len(findings) == 0 {
+		printInfo("No script results.")
+		return
+	}
+
+	for _, f := range findings {
+		where := ""
+		if f.Port != 0 {
+			where = fmt.Sprintf(" [%s/%d]", f.Protocol, f.Port)
+		}
+
+		switch {
+		case f.Vulnerable:
+			fmt.Printf("  %s[!]%s %s%s", colorRed, colorReset, f.ScriptID, where)
+		case len(f.CVEs) > 0:
+			// A lead, not a verified finding: the script matched the detected
+			// version against a CVE list rather than probing the service. Kept
+			// visually distinct from a script that actually said VULNERABLE.
+			fmt.Printf("  %s[?]%s %s%s", colorYellow, colorReset, f.ScriptID, where)
+		default:
+			fmt.Printf("  %s[-]%s %s%s", colorDim, colorReset, f.ScriptID, where)
+		}
+
+		if ids := formatCVEs(f.CVEs); ids != "" {
+			fmt.Printf("  %s%s%s", colorYellow, ids, colorReset)
+		}
+		fmt.Println()
+
+		// The output is the evidence, so it is shown for confirmed
+		// vulnerabilities. For enumeration scripts it is noise that drowns out
+		// the real findings.
+		if f.Vulnerable && f.Output != "" {
+			for _, line := range strings.Split(strings.TrimRight(f.Output, "\n"), "\n") {
+				fmt.Printf("      %s%s%s\n", colorDim, line, colorReset)
+			}
+		}
+	}
+}
+
+// formatCVEs renders at most maxCVEsShown identifiers, stating how many were
+// left out rather than truncating silently.
+func formatCVEs(cves []string) string {
+	if len(cves) == 0 {
+		return ""
+	}
+	shown, suffix := cves, ""
+	if len(cves) > maxCVEsShown {
+		shown = cves[:maxCVEsShown]
+		suffix = fmt.Sprintf(" (+%d more)", len(cves)-maxCVEsShown)
+	}
+	return strings.Join(shown, " ") + suffix
 }
 
 // cmdUpload reads a local file and uploads it to the target.

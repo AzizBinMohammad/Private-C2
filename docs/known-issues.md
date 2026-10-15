@@ -248,8 +248,8 @@ R13. **Data race on `ImplantSession` (fixed).** `ListSessions`/`GetSession` now
 1. **The entire OT/ICS assessment capability has no execution path.** The
     headline feature (32 files, 17 protocol clients, 10 models, a portal tab, OT
     CLI commands) cannot produce results: `cmd/implant/main.go` implements only
-    ten task types (shell, ls, pwd, cd, ps, cat, upload, download, screenshot,
-    nmap) and none of them is OT. `implant/modules/ot/**` is imported by
+    eleven task types (shell, ls, pwd, cd, ps, cat, upload, download, screenshot,
+    nmap, scan) and none of them is OT. `implant/modules/ot/**` is imported by
     nothing, and the six `/api/ot/*` routes are read-only database queries
     with no endpoint that starts an assessment.
 2. **`make proto` is a placeholder and no `.pb.go` exists.** `server/api/grpc/*`
@@ -285,3 +285,14 @@ R13. **Data race on `ImplantSession` (fixed).** `ListSessions`/`GetSession` now
     (`portscan` in particular looks supported because
     `implant/modules/network/network.go` implements a scope-checked port scan,
     but that package is imported by nothing.)
+9. **A `vulns` scan blocks the implant's beacon loop for its whole duration.**
+    `handleTask` in `cmd/implant/main.go` runs inline in a serial loop, so while
+    a scan runs the implant sends no checkins: the session looks stale in the
+    portal and any other queued task waits. It is bounded (the profile's
+    `--host-timeout` is 4 minutes and the module's own deadline 7), but a
+    `vulns` scan was measured at ~6m10s against a single loopback host, so in
+    practice the session reads as stale for minutes. Fixing it properly means
+    running tasks off the beacon loop with a separate result channel, which
+    changes the task model; the timeout values in `implant/modules/nmap`,
+    `cmd/client` (`scanPollTimeout`) and the portal (`taskPollAttempts`) are
+    sized to match each other and must move together.

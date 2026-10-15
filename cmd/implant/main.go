@@ -178,6 +178,15 @@ func handleTask(ctx context.Context, task protocol.TaskWire) (string, error) {
 		// is the operator asking whether it is.
 		return nmap.Execute(ctx, task.Args)
 
+	case "scan":
+		// Structured port/service/vulnerability scan. Unlike "nmap" this
+		// returns JSON rather than nmap's own text, so the operator surfaces
+		// can render services and findings as tables. Args is a JSON
+		// {"target","profile"}; the result is returned even alongside an error,
+		// because a scan cut short at its deadline still found what it found.
+		out, err := nmap.Scan(ctx, []byte(task.Args))
+		return string(out), err
+
 	default:
 		return "", fmt.Errorf("unknown task type: %s", task.Type)
 	}

@@ -157,6 +157,9 @@ tr.selected td{background:rgba(59,130,246,.1)}
 .pagination{display:flex;align-items:center;gap:12px;justify-content:center;padding:12px;border-top:1px solid var(--border);flex-shrink:0}
 .pagination span{font-size:13px;color:var(--fg2)}
 
+/* ── SCANNER ── */
+#panel-scanner{flex-direction:column;overflow:hidden}
+
 /* ── OT PANEL ── */
 #panel-ot{flex-direction:column;overflow:hidden}
 .ot-banner{background:linear-gradient(135deg,#1a0a2e,#0a1628);padding:20px;border-bottom:1px solid var(--purple);display:flex;align-items:center;gap:12px;flex-shrink:0}
@@ -259,6 +262,7 @@ tr.selected td{background:rgba(59,130,246,.1)}
     <div class="tab" data-panel="payloads">Payloads</div>
     <div class="tab" data-panel="operators">Operators</div>
     <div class="tab" data-panel="audit">Audit</div>
+    <div class="tab" data-panel="scanner">Scanner</div>
   </div>
 
   <div class="main">
@@ -467,6 +471,52 @@ tr.selected td{background:rgba(59,130,246,.1)}
         <button class="btn" id="audit-prev" onclick="auditPrev()" disabled>Prev</button>
         <span id="audit-page-info">Page 1</span>
         <button class="btn" id="audit-next" onclick="auditNext()">Next</button>
+      </div>
+    </div>
+
+    <!-- SCANNER -->
+    <div class="panel" id="panel-scanner">
+      <div class="toolbar">
+        <select id="scan-session" style="width:230px"></select>
+        <input type="text" id="scan-target" placeholder="target (IP, hostname or CIDR)" style="width:250px"
+               onkeydown="if(event.key==='Enter')runScan()">
+        <input type="text" id="scan-ports" placeholder="ports, e.g. 80,443 (blank = profile default)" style="width:280px"
+               onkeydown="if(event.key==='Enter')runScan()">
+        <select id="scan-profile" style="width:300px">
+          <option value="quick">quick &mdash; common ports</option>
+          <option value="services" selected>services &mdash; ports + versions</option>
+          <option value="vulns">vulnerabilities &mdash; NSE vuln scripts (intrusive)</option>
+        </select>
+        <div class="actions">
+          <button class="btn primary" id="scan-btn" onclick="runScan()">Scan</button>
+        </div>
+      </div>
+      <div class="ot-content">
+        <div class="empty-state" id="scan-empty">
+          <div class="big">&#9783;</div>
+          Choose a session, enter a target, and run a scan.
+        </div>
+
+        <div id="scan-report" style="display:none">
+          <div class="section-title" id="scan-summary"></div>
+
+          <div class="section-title" style="margin-top:18px">Services</div>
+          <div class="table-wrap" style="padding:0;overflow:visible">
+            <table>
+              <thead><tr><th>Host</th><th>Port</th><th>State</th><th>Service</th><th>Version</th><th>CPE</th></tr></thead>
+              <tbody id="scan-services-table"></tbody>
+            </table>
+          </div>
+
+          <div class="section-title" style="margin-top:18px">Findings</div>
+          <div class="ot-grid" id="scan-findings-grid"></div>
+          <div class="empty-state" id="scan-findings-empty" style="display:none">
+            <div class="big">&#10003;</div>
+            No script results.
+          </div>
+
+          <pre id="scan-raw" style="display:none;white-space:pre-wrap;font-size:12px;color:var(--fg2);margin-top:12px"></pre>
+        </div>
       </div>
     </div>
 
@@ -703,6 +753,7 @@ function switchTab(panel) {
   else if (panel === 'payloads') refreshPayloads();
   else if (panel === 'operators') refreshOperators();
   else if (panel === 'audit') refreshAudit();
+  else if (panel === 'scanner') refreshScanner();
   else if (panel === 'ot') loadOTData();
 }
 
@@ -1090,7 +1141,11 @@ function sendTask() {
 // needs a much longer window than the other tasks. This has to outlast the
 // implant's own nmap timeout plus a beacon interval either side.
 function taskPollAttempts(taskType) {
-  return taskType === 'nmap' ? 150 : 60;
+  if (taskType === 'nmap') return 150;
+  // The structured scan has to outlast the implant's longest profile: "vulns"
+  // gets 7 minutes there, so 300 attempts at 2s covers it plus beacon slack.
+  if (taskType === 'scan') return 300;
+  return 60;
 }
 
 function pollResult(taskId, attempts, max) {
@@ -1843,6 +1898,211 @@ function loadOTData() {
       '</div>';
     }).join('');
   }).catch(function() {});
+}
+
+// ══════════════════════════════════════════
+// SCANNER
+// ══════════════════════════════════════════
+//
+// A scan runs as a task on an implant session (the target host does the
+// scanning), and its result comes back as JSON inside the task's output field.
+// The panel therefore shows the live result of the scan you just ran rather
+// than a stored history.
+
+function refreshScanner() {
+  apiFetch('/api/sessions').then(function(d) {
+    var sessions = Array.isArray(d) ? d : [];
+    var sel = document.getElementById('scan-session');
+    var prev = sel.value;
+    sel.innerHTML = sessions.length
+      ? sessions.map(function(s) {
+          return '<option value="' + esc(s.id) + '">' + esc(truncId(s.id)) + ' — ' +
+                 esc(s.username) + '@' + esc(s.hostname) + '</option>';
+        }).join('')
+      : '<option value="">no sessions connected</option>';
+    if (prev) sel.value = prev;
+  }).catch(function() {
+    document.getElementById('scan-session').innerHTML = '<option value="">failed to load sessions</option>';
+  });
+}
+
+function scanStatus(text) {
+  var empty = document.getElementById('scan-empty');
+  document.getElementById('scan-report').style.display = 'none';
+  empty.style.display = '';
+  empty.innerHTML = '<div class="big">&#9783;</div>' + esc(text);
+}
+
+function runScan() {
+  var sessionId = document.getElementById('scan-session').value;
+  var target = document.getElementById('scan-target').value.trim();
+  var ports = document.getElementById('scan-ports').value.trim();
+  var profile = document.getElementById('scan-profile').value;
+
+  if (!sessionId) { toast('No session selected', 'error'); return; }
+  if (!target) { toast('Enter a target', 'error'); return; }
+
+  if (profile === 'vulns') {
+    // NSE vulnerability scripts actively probe the service and can disrupt it,
+    // so this tier is opt-in and confirmed rather than the default.
+    confirmModal('Run vulnerability scan?',
+      'The vulnerabilities profile runs nmap NSE scripts against ' + esc(target) +
+      '. Those scripts actively probe the target and can disrupt or crash the service being tested.',
+      function() { issueScan(sessionId, target, profile, ports); });
+    return;
+  }
+  issueScan(sessionId, target, profile, ports);
+}
+
+function issueScan(sessionId, target, profile, ports) {
+  document.getElementById('scan-btn').disabled = true;
+  scanStatus('Scanning ' + target + (ports ? ' ports ' + ports : '') + ' (' + profile + ')…');
+
+  apiFetch('/api/sessions/' + sessionId + '/task', {
+    method: 'POST',
+    // Target, profile and ports travel as JSON so none can be confused with
+    // another, or with an nmap option.
+    body: { type: 'scan', args: JSON.stringify({ target: target, profile: profile, ports: ports }) }
+  }).then(function(d) {
+    if (d.error) { scanFailed(d.error); return; }
+    pollScan(d.task_id, 0, taskPollAttempts('scan'));
+  }).catch(function(e) { scanFailed('Request failed: ' + e.message); });
+}
+
+function pollScan(taskId, attempts, max) {
+  setTimeout(function() {
+    apiFetch('/api/tasks/' + taskId).then(function(d) {
+      if (d.status === 'pending') {
+        if (attempts + 1 > max) { scanFailed('Timed out waiting for the scan.'); return; }
+        pollScan(taskId, attempts + 1, max);
+        return;
+      }
+      renderScan(d);
+    }).catch(function() {
+      if (attempts + 1 > max) { scanFailed('Timed out waiting for the scan.'); return; }
+      pollScan(taskId, attempts + 1, max);
+    });
+  }, 2000);
+}
+
+function scanFailed(msg) {
+  document.getElementById('scan-btn').disabled = false;
+  scanStatus('Scan failed.');
+  toast(msg || 'Scan failed', 'error');
+}
+
+function renderScan(d) {
+  document.getElementById('scan-btn').disabled = false;
+
+  var scan = null;
+  try { scan = JSON.parse(d.output || ''); } catch (e) { scan = null; }
+
+  if (!scan) {
+    // Not a structured scan (an older implant, or a hard failure). Show what
+    // came back rather than an empty panel.
+    scanFailed(d.error || d.output || 'No output returned.');
+    return;
+  }
+
+  document.getElementById('scan-empty').style.display = 'none';
+  document.getElementById('scan-report').style.display = '';
+
+  var summary = 'Scan of ' + esc(scan.target) + ' (' + esc(scan.profile) + ')';
+  if (scan.ports) { summary += ' ports ' + esc(scan.ports); }
+  if (scan.elapsed) { summary += ' — ' + esc(scan.elapsed) + 's'; }
+  if (d.error) { summary += ' <span class="badge badge-red">failed</span>'; }
+  else if (scan.partial) { summary += ' <span class="badge badge-yellow">partial</span>'; }
+  document.getElementById('scan-summary').innerHTML = summary;
+
+  renderScanServices(scan.services || []);
+  renderScanFindings(scan.findings || []);
+
+  // When nmap's XML could not be parsed, its own text is all there is; showing
+  // that beats presenting an empty result as a scan that found nothing.
+  var raw = document.getElementById('scan-raw');
+  if (scan.raw) {
+    // Raw output only appears when nothing could be decoded, and the partial
+    // document can be tens of kilobytes of <scaninfo> attributes. Cap it.
+    var limit = 4000;
+    raw.textContent = scan.raw.length > limit
+      ? scan.raw.slice(0, limit) + '\n... [' + (scan.raw.length - limit) + ' more bytes of raw output omitted]'
+      : scan.raw;
+    raw.style.display = '';
+  } else {
+    raw.style.display = 'none';
+  }
+
+  if (scan.notice) { toast(scan.notice, 'info'); }
+  if (d.error) { toast(d.error, 'error'); }
+}
+
+function renderScanServices(services) {
+  var tb = document.getElementById('scan-services-table');
+  if (services.length === 0) {
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--fg3);padding:20px">No ports reported</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = services.map(function(s) {
+    var version = [s.product, s.version].filter(Boolean).join(' ');
+    if (s.extra_info) { version += (version ? ' ' : '') + '(' + s.extra_info + ')'; }
+    // Closed ports are listed too, so "checked, nothing there" stays
+    // distinguishable from "never checked".
+    var state = s.state === 'open'
+      ? '<span class="badge badge-green">open</span>'
+      : esc(s.state || '—');
+    return '<tr>' +
+      '<td>' + esc(s.host) + '</td>' +
+      '<td>' + esc(s.port + '/' + s.protocol) + '</td>' +
+      '<td>' + state + '</td>' +
+      '<td>' + esc(s.name || '—') + '</td>' +
+      '<td>' + esc(version || '—') + '</td>' +
+      '<td>' + esc(s.cpe || '') + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderScanFindings(findings) {
+  var grid = document.getElementById('scan-findings-grid');
+  var empty = document.getElementById('scan-findings-empty');
+
+  if (findings.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  grid.innerHTML = findings.map(function(f) {
+    // nmap's XML carries no severity, so this reflects what the script's own
+    // output asserted -- not a rating invented from the script's name. A script
+    // that only matched the detected version against a CVE list gets its own
+    // badge: a lead to follow, not a verified finding.
+    var badge = f.vulnerable
+      ? '<span class="badge badge-red">VULNERABLE</span>'
+      : (f.cves && f.cves.length)
+        ? '<span class="badge badge-yellow">CVE match</span>'
+        : '<span class="badge badge-gray">info</span>';
+    var where = f.port ? esc(f.protocol + '/' + f.port) : 'host';
+
+    // Cap the identifiers: a version-match script can name a hundred, and the
+    // card would otherwise be nothing but a wall of CVE numbers.
+    var cves = '';
+    if (f.cves && f.cves.length) {
+      var cveLimit = 8;
+      var shown = f.cves.slice(0, cveLimit).join(' ');
+      var more = f.cves.length > cveLimit ? ' (+' + (f.cves.length - cveLimit) + ' more)' : '';
+      cves = '<div class="detail"><b>CVEs (' + f.cves.length + '):</b> ' + esc(shown + more) + '</div>';
+    }
+    var out = (f.vulnerable && f.output)
+      ? '<pre style="white-space:pre-wrap;font-size:11px;color:var(--fg3);margin-top:8px;max-height:180px;overflow:auto">' + esc(f.output) + '</pre>'
+      : '';
+    return '<div class="ot-card">' +
+      '<h3>' + esc(f.script_id) + '</h3>' +
+      '<div class="detail">' + badge + ' ' + where + '</div>' +
+      cves + out +
+    '</div>';
+  }).join('');
 }
 </script>
 </body>

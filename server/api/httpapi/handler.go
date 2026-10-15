@@ -65,7 +65,10 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 
 	// ───────────────── Beacons ─────────────────
 
-	bh := &beaconHandler{db: db}
+	// Beacons are read from the beacons table *and* from live sessions: the
+	// table has no writer in the running server, so reading it alone left the
+	// portal's panel empty. See the comment on beaconHandler.
+	bh := &beaconHandler{db: db, implantServer: implantServer}
 	api.HandleFunc("/api/beacons", bh.handleBeacons)
 
 	// ───────────────── Listeners ─────────────────

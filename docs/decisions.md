@@ -274,3 +274,41 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
   serial-task model in `cmd/implant`. Raising `DefaultTimeout` past
   `nmapPollTimeout` in `cmd/client` and the portal's `taskPollAttempts` would
   make a running scan invisible to both interfaces before it finishes.
+
+---
+
+## Scanner: Structured nmap on the Target, With Opt-In Vulnerability Scripts
+
+* **Decision**: A `scan` task type runs nmap **on the implant's host** and returns
+  structured JSON rather than nmap's text. It offers three profiles — `quick`
+  (`-T4 -F`), `services` (`-sV -T4`, the default) and `vulns`
+  (`-sV -T4 -F --script vuln --host-timeout 4m`). nmap's XML is requested on
+  stdout (`-oX -`) and decoded with `encoding/xml` into services and findings.
+  The surfaces are a `scan <target> [--quick|--services|--vulns]` console command
+  and a Scanner tab in the portal.
+* **Why**: A raw `nmap` run returns an opaque string, so an operator cannot see a
+  list of services or vulnerabilities and nothing can be rendered as a table.
+  Scanning on the target keeps the reach that motivated the earlier `nmap`
+  decision. Vulnerability scripts are opt-in and confirmed in the portal because
+  NSE's `vuln` category actively probes the service it tests and can crash or
+  wedge it — unacceptable as a default against production or OT hosts.
+  `--host-timeout` is set deliberately: a scan that nmap ends itself produces a
+  closed XML document, whereas a scan killed by the caller stops mid-write. The
+  XML decoder is tolerant for the same reason, keeping whatever arrived before a
+  truncation instead of discarding a six-minute scan's results, and it verifies
+  the closing `</nmaprun>` so a half-document is flagged rather than presented as
+  a clean scan.
+* **No severity is reported.** nmap's XML carries none, and nmap has never
+  emitted one — the colour a human sees on a terminal comes from the script's own
+  output text. Findings therefore record what the output asserted (`vulnerable`)
+  and the CVE identifiers it named, rather than a ranking inferred from the
+  script's name.
+* **What would conflict with it**: A long scan blocks the implant's serial beacon
+  loop for its duration, so the session looks stale while `vulns` runs; fixing
+  that means background task execution with a separate result channel, which
+  would change the task model in `cmd/implant`. Wiring an engagement scope into
+  `cmd/implant` (TODO.md Priority 2) would add a pre-execution check this task
+  type currently bypasses. Raising a profile's timeout past the console's
+  `scanPollTimeout` or the portal's `taskPollAttempts` would make a running scan
+  invisible before it finishes. Persisting results (a planned follow-up) needs a
+  result hook in `server/c2`, which today holds live state only in memory.

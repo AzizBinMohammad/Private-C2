@@ -97,9 +97,11 @@ Private-C2/
                            #   testing, vulnerability scanning, compliance analysis,
                            #   topology mapping, traffic capture, HMI scanning,
                            #   wireless detection, PLC logic analysis, serial comms
-      nmap/                # nmap port scanning on the target: availability check
+      nmap/                # nmap on the target. nmap.go: availability check
                            #   (LookPath + absolute-path fallback), argv-separated
-                           #   execution, bounded timeout
+                           #   execution, bounded timeout. xml.go + scan.go:
+                           #   structured scans (quick/services/vulns) that parse
+                           #   nmap's XML into services and findings
       process/             # Process listing (platform-specific)
       screenshot/          # Screenshot capture
       shell/               # Shell command execution (Unix/Windows)
@@ -164,11 +166,11 @@ Private-C2/
 
 3. **Beacon loop**: the implant sleeps for `interval +/- jitter`, then sends a `checkin` message. The server responds with a `tasking` message containing any queued tasks.
 
-4. **Task execution**: the implant executes tasks (shell, ls, pwd, cd, ps, cat, upload, download, screenshot, nmap), sends `result` messages back. The server stores results in memory (`taskResults` map) and responds with `result_ack`.
+4. **Task execution**: the implant executes tasks (shell, ls, pwd, cd, ps, cat, upload, download, screenshot, nmap, scan), sends `result` messages back. The server stores results in memory (`taskResults` map) and responds with `result_ack`.
 
 5. **Operator CLI** (`cmd/client/main.go`): connects to the HTTP API (`server/api/httpapi/handler.go`), lists sessions via `GET /api/sessions`, submits tasks via `POST /api/sessions/{id}/task`, polls results via `GET /api/tasks/{id}`.
 
-6. **Web portal** (`server/api/httpapi/webui/index.html`): embedded SPA served at `/`, authenticates via `POST /api/auth/login` (receives Bearer token), provides dashboard with session management, task submission, listener control, engagement management, payload generation with download, audit log viewer, and OT assessment interface.
+6. **Web portal** (`server/api/httpapi/webui/index.html`): embedded SPA served at `/`, authenticates via `POST /api/auth/login` (receives Bearer token), provides dashboard with session management, task submission, listener control, engagement management, payload generation with download, audit log viewer, a scanner (set a target, read back services and findings), and the OT assessment interface.
 
 ### Database
 
@@ -265,6 +267,10 @@ go run ./cmd/client/... --server http://127.0.0.1:8080
 
 # Attach to a specific session on startup (what scripts/run.sh does)
 go run ./cmd/client/... --server http://127.0.0.1:8080 --session <id-prefix>
+
+# Console commands for scanning (both need an active session):
+#   nmap [target] [opts]              raw nmap; no args reports the version
+#   scan <target> [--quick|--services|--vulns]   structured, rendered as tables
 ```
 
 ### Run Implant

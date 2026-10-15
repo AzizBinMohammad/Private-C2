@@ -269,7 +269,7 @@ graph TD
 
 - **Job**: Task dispatch with concurrency limits (semaphore), timeouts, and result buffering for beacon mode. Registry pattern for handler functions.
 - **Task types defined**: shell, upload, download, ls, ps, ifconfig, screenshot, kill, cat, mkdir, rm, cp, mv, pwd, cd, netstat, portscan, resolve.
-- **Note**: **Not used** by `cmd/implant/main.go`, which has its own inline `handleTask` switch statement supporting a subset (shell, ls, pwd, cd, ps, cat, upload, download, screenshot, nmap).
+- **Note**: **Not used** by `cmd/implant/main.go`, which has its own inline `handleTask` switch statement supporting a subset (shell, ls, pwd, cd, ps, cat, upload, download, screenshot, nmap, scan).
 
 ### `implant/transport` (Transport Library)
 
