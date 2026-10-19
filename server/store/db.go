@@ -75,6 +75,8 @@ func Migrate(db *gorm.DB) error {
 		&models.Operator{},
 		&models.Session{},
 		&models.Beacon{},
+		&models.Task{},
+		&models.TaskResult{},
 		&models.Listener{},
 		&models.PayloadArtifact{},
 		&models.AuditEntry{},

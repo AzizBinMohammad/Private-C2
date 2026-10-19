@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"gorm.io/gorm"
@@ -76,8 +77,12 @@ func (r *SessionRepository) UpdateHealth(id, status string, latencyMs, jitterMs 
 		}).Error
 }
 
-func (r *SessionRepository) MarkStale() error {
+// MarkStale marks sessions whose last check-in predates before. The previous
+// implementation had no predicate and marked every session stale, including
+// sessions that were actively checking in.
+func (r *SessionRepository) MarkStale(before time.Time) error {
 	return r.db.Model(&models.Session{}).
-		Where("health_status != ?", "lost").
+		Where("health_status IN ?", []string{"active", "stale"}).
+		Where("last_checkin < ?", before).
 		Update("health_status", "stale").Error
 }
