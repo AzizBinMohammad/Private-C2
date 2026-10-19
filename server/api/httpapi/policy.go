@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/azizbinmohammad/private-c2/pkg/engagement"
+	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 	"github.com/azizbinmohammad/private-c2/pkg/taskargs"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
@@ -17,9 +18,13 @@ var errPolicyDenied = errors.New("task denied by engagement policy")
 // authorizeTask applies engagement-level policy before a task is persisted or
 // queued. It is a server-side check in addition to the implant's SafetyChecker.
 func (sh *sessionHandler) authorizeTask(sess *c2.ImplantSession, taskType, args string) error {
+	category := protocol.CategoryFor(taskType)
 	if sess == nil || sess.EngagementID == "" {
-		// Development/unscoped mode. Production deployments should assign an
-		// engagement to every listener and implant.
+		// Unscoped development mode is limited to non-sensitive task types.
+		// Sensitive categories require an engagement with an explicit gate.
+		if category != protocol.CategoryGeneral {
+			return fmt.Errorf("%w: %s tasks require an engagement", errPolicyDenied, category)
+		}
 		return nil
 	}
 	if sh.db == nil {
@@ -32,6 +37,9 @@ func (sh *sessionHandler) authorizeTask(sess *c2.ImplantSession, taskType, args 
 	}
 	if eng.Status == "killed" || eng.Status == "closed" || eng.KillSwitchActive {
 		return fmt.Errorf("%w: engagement is not active", errPolicyDenied)
+	}
+	if !capabilityAllowed(eng, category) {
+		return fmt.Errorf("%w: capability %q is not enabled for this engagement", errPolicyDenied, category)
 	}
 
 	now := time.Now()
@@ -62,6 +70,27 @@ func (sh *sessionHandler) authorizeTask(sess *c2.ImplantSession, taskType, args 
 		return fmt.Errorf("%w: %s", errPolicyDenied, reason)
 	}
 	return nil
+}
+
+func capabilityAllowed(eng models.Engagement, category protocol.TaskCategory) bool {
+	switch category {
+	case protocol.CategoryGeneral:
+		return true
+	case protocol.CategoryPrivilege:
+		return eng.AllowPrivilegeEscalation
+	case protocol.CategoryCredential:
+		return eng.AllowCredentialAccess
+	case protocol.CategoryLateral:
+		return eng.AllowLateralMovement
+	case protocol.CategoryPersistence:
+		return eng.AllowPersistence
+	case protocol.CategoryEvasion:
+		return eng.AllowEvasion
+	case protocol.CategoryOT:
+		return eng.AllowOTAssessment
+	default:
+		return false
+	}
 }
 
 func techniqueAllowed(raw, taskType string) bool {

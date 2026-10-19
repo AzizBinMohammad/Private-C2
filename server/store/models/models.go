@@ -169,11 +169,19 @@ type Engagement struct {
 	TimeWindowStart      *time.Time `json:"time_window_start,omitempty"`
 	TimeWindowEnd        *time.Time `json:"time_window_end,omitempty"`
 	AuthorizedTechniques string     `gorm:"type:text" json:"authorized_techniques"` // JSON array
-	DataCollectionLevel  string     `json:"data_collection_level"`
-	ExfilLimitBytes      int64      `json:"exfil_limit_bytes"`
-	EmergencyContact     string     `json:"emergency_contact"`
-	ProfileConfig        string     `gorm:"type:text" json:"profile_config"` // JSON
-	CreatedBy            string     `json:"created_by"`
+	// Capability gates are off by default. Sensitive task categories require
+	// the matching engagement flag (and an explicit authorization reference).
+	AllowPrivilegeEscalation bool   `gorm:"default:false" json:"allow_privilege_escalation"`
+	AllowCredentialAccess    bool   `gorm:"default:false" json:"allow_credential_access"`
+	AllowLateralMovement     bool   `gorm:"default:false" json:"allow_lateral_movement"`
+	AllowPersistence         bool   `gorm:"default:false" json:"allow_persistence"`
+	AllowEvasion             bool   `gorm:"default:false" json:"allow_evasion"`
+	AllowOTAssessment        bool   `gorm:"default:false" json:"allow_ot_assessment"`
+	DataCollectionLevel      string `json:"data_collection_level"`
+	ExfilLimitBytes          int64  `json:"exfil_limit_bytes"`
+	EmergencyContact         string `json:"emergency_contact"`
+	ProfileConfig            string `gorm:"type:text" json:"profile_config"` // JSON
+	CreatedBy                string `json:"created_by"`
 }
 
 type AuditEntry struct {

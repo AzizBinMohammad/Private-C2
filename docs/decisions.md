@@ -412,3 +412,24 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
   without breaking the chain.
 * **What would conflict with it**: Storing entries without `TimestampUnixNano`,
   or writing audit rows outside the writer (which would break continuity).
+
+## Process and Token Operations: Gated, Task-Scoped Impersonation (2026-10-19)
+
+* **Decision**: `process_info` is a general task; `process_suspend`,
+  `process_resume`, `getprivs`, and every `token_*` task map to the
+  `privilege` capability and are refused unless the engagement enables
+  privilege escalation on both the server and the implant. Tokens stolen or
+  created during a task live in a per-implant handle store. Impersonation
+  applies a stored token to an OS-thread-locked task, reads back the effective
+  identity, and reverts before the task returns.
+* **Why**: The implant runs tasks on a worker pool. A token left impersonated
+  on a pooled thread could silently change the identity of an unrelated later
+  task. Task-scoped impersonation makes the privilege gate auditable and keeps
+  every task's identity deterministic. Running a child process as the
+  impersonated user needs `CreateProcessWithTokenW` and is deliberately not
+  part of this cut; `Impersonate` proves the token works without pretending
+  the child process inherited it.
+* **What would conflict with it**: Migrating to persistent impersonation
+  requires a dedicated OS-thread-locked worker and a command queue. Do not
+  remove the defer-revert, share the token store across processes, or loosen
+  the privilege category without an engagement-level gate.

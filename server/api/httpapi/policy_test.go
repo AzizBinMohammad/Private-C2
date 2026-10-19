@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 )
@@ -50,6 +51,49 @@ func TestAuthorizeTask_EngagementPolicy(t *testing.T) {
 		if !tc.allow && !errors.Is(err, errPolicyDenied) {
 			t.Errorf("%s: err = %v, want policy denial", tc.name, err)
 		}
+	}
+}
+
+func TestAuthorizeTask_CapabilityGates(t *testing.T) {
+	_, _, db := setupTestRouter(t)
+	sh := &sessionHandler{db: db}
+
+	eng := &models.Engagement{Name: "gated", Status: "active"}
+	if err := db.Create(eng).Error; err != nil {
+		t.Fatal(err)
+	}
+	sess := &c2.ImplantSession{EngagementID: eng.ID}
+
+	// Sensitive categories are denied until the explicit gate is enabled.
+	if err := sh.authorizeTask(sess, protocol.TaskOTDiscover, "10.0.0.5"); !errors.Is(err, errPolicyDenied) {
+		t.Fatalf("ot_discover without gate = %v, want denial", err)
+	}
+	if err := sh.authorizeTask(sess, protocol.TaskOTCredentials, "10.0.0.5"); !errors.Is(err, errPolicyDenied) {
+		t.Fatalf("ot_credentials without gate = %v, want denial", err)
+	}
+	if err := sh.authorizeTask(sess, "credential_dump", ""); !errors.Is(err, errPolicyDenied) {
+		t.Fatalf("credential_dump without gate = %v, want denial", err)
+	}
+
+	if err := db.Model(eng).Updates(map[string]any{
+		"allow_ot_assessment":     true,
+		"allow_credential_access": true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := sh.authorizeTask(sess, protocol.TaskOTDiscover, "10.0.0.5"); err != nil {
+		t.Fatalf("ot_discover with gate denied: %v", err)
+	}
+	if err := sh.authorizeTask(sess, protocol.TaskOTCredentials, "10.0.0.5"); err != nil {
+		t.Fatalf("ot_credentials with gate denied: %v", err)
+	}
+}
+
+func TestAuthorizeTask_UnscopedSensitiveDenied(t *testing.T) {
+	_, _, db := setupTestRouter(t)
+	sh := &sessionHandler{db: db}
+	if err := sh.authorizeTask(&c2.ImplantSession{}, protocol.TaskOTDiscover, "10.0.0.5"); !errors.Is(err, errPolicyDenied) {
+		t.Fatalf("unscoped OT task = %v, want denial", err)
 	}
 }
 

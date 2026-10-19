@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/implant/modules/ot"
 	"github.com/azizbinmohammad/private-c2/implant/safety"
 	"github.com/azizbinmohammad/private-c2/implant/task"
 	"github.com/azizbinmohammad/private-c2/pkg/engagement"
@@ -35,6 +36,19 @@ import (
 var (
 	agentSafety    *safety.SafetyChecker
 	agentAllowlist *safety.CommandAllowlist
+
+	agentScope        *engagement.Scope
+	agentTimeWindow   *engagement.TimeWindow
+	agentKillSwitch   *engagement.KillSwitch
+	agentEngagementID string
+	agentOT           *ot.OTModule
+
+	agentAllowPrivilege   bool
+	agentAllowCredential  bool
+	agentAllowLateral     bool
+	agentAllowPersistence bool
+	agentAllowEvasion     bool
+	agentAllowOT          bool
 
 	errKillSwitch = errors.New("kill switch activated")
 )
@@ -275,7 +289,20 @@ func main() {
 	dataQuotaBytes := flag.Int64("data-quota-bytes", embedded.DataQuotaBytes, "maximum bytes the implant may exfiltrate (0 = unlimited)")
 	remoteKillURL := flag.String("remote-kill-url", embedded.RemoteKillURL, "URL polled for a remote kill signal (fail-closed when unreachable)")
 	safeMode := flag.Bool("safe-mode", embedded.SafeMode, "enforce the read-only command allowlist")
+	allowPrivilege := flag.Bool("allow-privilege-escalation", embedded.AllowPrivilegeEscalation, "permit privilege-escalation tasks")
+	allowCredential := flag.Bool("allow-credential-access", embedded.AllowCredentialAccess, "permit credential-access tasks")
+	allowLateral := flag.Bool("allow-lateral-movement", embedded.AllowLateralMovement, "permit lateral-movement tasks")
+	allowPersistence := flag.Bool("allow-persistence", embedded.AllowPersistence, "permit persistence tasks")
+	allowEvasion := flag.Bool("allow-evasion", embedded.AllowEvasion, "permit evasion tasks")
+	allowOT := flag.Bool("allow-ot", embedded.AllowOTAssessment, "permit OT/ICS assessment tasks")
 	flag.Parse()
+
+	agentAllowPrivilege = *allowPrivilege
+	agentAllowCredential = *allowCredential
+	agentAllowLateral = *allowLateral
+	agentAllowPersistence = *allowPersistence
+	agentAllowEvasion = *allowEvasion
+	agentAllowOT = *allowOT
 
 	setFlags := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
@@ -295,6 +322,14 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("safety configuration: %v", err)
+	}
+
+	// OT assessments require an explicit scope. Without one, the OT task
+	// handlers refuse rather than operating unscoped.
+	if agentScope != nil {
+		agentOT = ot.NewOTModule(ot.DefaultOTConfig(), agentKillSwitch, agentScope, agentTimeWindow, agentEngagementID)
+		agentOT.Start()
+		defer agentOT.Stop()
 	}
 
 	transport := embedded.Transport
@@ -492,6 +527,10 @@ func buildSafety(cfg safetyConfig) (*safety.SafetyChecker, *safety.CommandAllowl
 	}
 
 	killSwitch := engagement.NewKillSwitch()
+	agentScope = scope
+	agentTimeWindow = window
+	agentKillSwitch = killSwitch
+	agentEngagementID = cfg.EngagementID
 	checker := safety.NewSafetyChecker(safety.SafetyConfig{
 		KillSwitch:    killSwitch,
 		EngagementID:  cfg.EngagementID,
@@ -530,6 +569,35 @@ func taskTarget(t protocol.TaskWire) string {
 }
 
 func checkTaskSafety(ctx context.Context, t protocol.TaskWire) error {
+	switch protocol.CategoryFor(t.Type) {
+	case protocol.CategoryOT:
+		if !agentAllowOT {
+			return fmt.Errorf("refused: OT assessment is not enabled for this engagement")
+		}
+		if agentOT == nil {
+			return fmt.Errorf("refused: OT assessment requires an engagement scope")
+		}
+	case protocol.CategoryPrivilege:
+		if !agentAllowPrivilege {
+			return fmt.Errorf("refused: privilege escalation is not enabled for this engagement")
+		}
+	case protocol.CategoryCredential:
+		if !agentAllowCredential {
+			return fmt.Errorf("refused: credential access is not enabled for this engagement")
+		}
+	case protocol.CategoryLateral:
+		if !agentAllowLateral {
+			return fmt.Errorf("refused: lateral movement is not enabled for this engagement")
+		}
+	case protocol.CategoryPersistence:
+		if !agentAllowPersistence {
+			return fmt.Errorf("refused: persistence is not enabled for this engagement")
+		}
+	case protocol.CategoryEvasion:
+		if !agentAllowEvasion {
+			return fmt.Errorf("refused: evasion is not enabled for this engagement")
+		}
+	}
 	if agentAllowlist != nil && agentAllowlist.IsEnabled() && t.Type == protocol.TaskShell {
 		if ok, reason := agentAllowlist.IsAllowed(t.Args); !ok {
 			return fmt.Errorf("refused by command allowlist: %s", reason)
@@ -555,6 +623,9 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID, sessionToken stri
 	defer runner.Close()
 
 	for {
+		if agentOT != nil {
+			agentOT.WatchdogTick()
+		}
 		if agentSafety != nil {
 			check := agentSafety.Check(ctx)
 			if !check.Passed {

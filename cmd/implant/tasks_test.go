@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/azizbinmohammad/private-c2/implant/safety"
+	"github.com/azizbinmohammad/private-c2/pkg/engagement"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 )
 
@@ -131,6 +134,105 @@ func TestUploadDownloadHandlers(t *testing.T) {
 	}
 	if string(decoded) != "payload" {
 		t.Fatalf("download = %q, want payload", decoded)
+	}
+}
+
+func TestChunkedDownload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.bin")
+	content := make([]byte, 2*1024*1024+123)
+	for i := range content {
+		content[i] = byte(i % 251)
+	}
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	statJSON, err := handleDownloadStat(context.Background(), path)
+	if err != nil {
+		t.Fatalf("download_stat: %v", err)
+	}
+	var stat struct {
+		Size   int64  `json:"size"`
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal([]byte(statJSON), &stat); err != nil {
+		t.Fatalf("decode stat: %v", err)
+	}
+	if stat.Size != int64(len(content)) || stat.SHA256 == "" {
+		t.Fatalf("unexpected stat: %+v", stat)
+	}
+
+	var assembled []byte
+	const chunkSize = 1 << 20
+	for offset := int64(0); offset < int64(len(content)); offset += chunkSize {
+		args, _ := json.Marshal(map[string]any{"path": path, "offset": offset, "length": chunkSize})
+		out, err := handleDownloadChunk(context.Background(), string(args))
+		if err != nil {
+			t.Fatalf("download_chunk at %d: %v", offset, err)
+		}
+		var chunk struct {
+			Data   string `json:"data"`
+			Offset int64  `json:"offset"`
+			Length int    `json:"length"`
+			EOF    bool   `json:"eof"`
+		}
+		if err := json.Unmarshal([]byte(out), &chunk); err != nil {
+			t.Fatalf("decode chunk: %v", err)
+		}
+		data, err := base64.StdEncoding.DecodeString(chunk.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assembled = append(assembled, data...)
+		if chunk.EOF && offset+int64(chunk.Length) >= int64(len(content)) {
+			break
+		}
+	}
+	if !reflect.DeepEqual(assembled, content) {
+		t.Fatalf("assembled %d bytes, want %d", len(assembled), len(content))
+	}
+}
+
+func TestChunkedUpload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "uploaded.bin")
+
+	first, _ := json.Marshal(map[string]any{
+		"path": path, "offset": 0, "data": base64.StdEncoding.EncodeToString([]byte("hello ")), "truncate": true,
+	})
+	if _, err := handleUploadChunk(context.Background(), string(first)); err != nil {
+		t.Fatalf("first upload_chunk: %v", err)
+	}
+	second, _ := json.Marshal(map[string]any{
+		"path": path, "offset": 6, "data": base64.StdEncoding.EncodeToString([]byte("world")),
+	})
+	if _, err := handleUploadChunk(context.Background(), string(second)); err != nil {
+		t.Fatalf("second upload_chunk: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello world" {
+		t.Fatalf("uploaded content = %q", got)
+	}
+}
+
+func TestChunkedDownload_DataQuota(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "quota.bin")
+	if err := os.WriteFile(path, make([]byte, 1024), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	old := agentSafety
+	agentSafety = safety.NewSafetyChecker(safety.SafetyConfig{DataQuota: engagement.NewDataQuota(10)})
+	defer func() { agentSafety = old }()
+
+	args, _ := json.Marshal(map[string]any{"path": path, "offset": 0, "length": 100})
+	if _, err := handleDownloadChunk(context.Background(), string(args)); err == nil {
+		t.Fatal("download_chunk ignored the data quota")
 	}
 }
 

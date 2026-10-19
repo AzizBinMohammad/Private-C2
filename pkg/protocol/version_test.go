@@ -44,6 +44,11 @@ func TestImplementedTaskTypes(t *testing.T) {
 	for _, want := range []string{
 		TaskShell, TaskScan, TaskPortscan, TaskResolve, TaskKill,
 		TaskMkdir, TaskRm, TaskCp, TaskMv, TaskNetstat, TaskIfconfig,
+		TaskWhoami, TaskOTDiscover, TaskOTFingerprint, TaskOTPLCRead,
+		TaskCredentialEnum, TaskCredentialRead,
+		TaskProcessInfo, TaskProcessSuspend, TaskProcessResume,
+		TaskTokenList, TaskTokenSteal, TaskTokenMake, TaskTokenImpersonate,
+		TaskTokenRevert, TaskGetprivs,
 	} {
 		if !IsImplementedTaskType(want) {
 			t.Errorf("task type %q is not registered", want)
@@ -105,6 +110,33 @@ func TestV2RegisterRoundTrip(t *testing.T) {
 	if out.ProtocolVersion != Version2 || out.EngagementID != "eng-1" ||
 		len(out.Transports) != 2 || out.Capabilities[0] != CapabilityKill {
 		t.Fatalf("round-trip mismatch: %+v", out)
+	}
+}
+
+func TestCategoryFor(t *testing.T) {
+	cases := map[string]TaskCategory{
+		TaskShell:            CategoryGeneral,
+		TaskOTDiscover:       CategoryOT,
+		TaskOTFingerprint:    CategoryOT,
+		TaskOTCredentials:    CategoryCredential,
+		"credential_dump":    CategoryCredential,
+		"lateral_psexec":     CategoryLateral,
+		"persist_systemd":    CategoryPersistence,
+		"evasion_sleep":      CategoryEvasion,
+		TaskTokenList:        CategoryPrivilege,
+		TaskTokenSteal:       CategoryPrivilege,
+		TaskTokenImpersonate: CategoryPrivilege,
+		TaskProcessSuspend:   CategoryPrivilege,
+		TaskProcessResume:    CategoryPrivilege,
+		TaskGetprivs:         CategoryPrivilege,
+		TaskProcessInfo:      CategoryGeneral,
+		TaskCredentialEnum:   CategoryCredential,
+		TaskCredentialRead:   CategoryCredential,
+	}
+	for taskType, want := range cases {
+		if got := CategoryFor(taskType); got != want {
+			t.Errorf("CategoryFor(%q) = %q, want %q", taskType, got, want)
+		}
 	}
 }
 

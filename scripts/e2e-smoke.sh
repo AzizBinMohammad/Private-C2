@@ -211,4 +211,73 @@ assert r.get("success") is True, f"built payload task failed: {r}"
 assert r.get("output", "").strip(), "built payload task returned empty output"
 '
 
-echo "E2E OK: mTLS $SID/$TID; HTTPS $HSID/$HTID; built payload $BSID/$BTID"
+# Chunked download: stat then fetch the first chunk and compare it to the
+# local reference file. This exercises the bounded-transfer task types.
+REF_FILE=/etc/hostname
+STAT_TASK="$(curl -fsS -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"type\":\"download_stat\",\"args\":\"$REF_FILE\"}")"
+STAT_TID="$(printf '%s' "$STAT_TASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+STAT_RES=""
+for _ in $(seq 1 40); do
+  STAT_RES="$(curl -fsS "$API/api/tasks/$STAT_TID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$STAT_RES" | grep -q '"status":"pending"'; then break; fi
+  sleep 0.5
+done
+printf '%s' "$STAT_RES" | python3 -c 'import sys,json; r=json.load(sys.stdin); assert r["success"], r'
+
+CHUNK_ARGS="$(python3 -c 'import json,sys; print(json.dumps({"path":sys.argv[1],"offset":0,"length":65536}))' "$REF_FILE")"
+CHUNK_TASK="$(curl -fsS -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "$(python3 -c 'import json,sys; print(json.dumps({"type":"download_chunk","args":sys.argv[1]}))' "$CHUNK_ARGS")")"
+CHUNK_TID="$(printf '%s' "$CHUNK_TASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+CHUNK_RES=""
+for _ in $(seq 1 40); do
+  CHUNK_RES="$(curl -fsS "$API/api/tasks/$CHUNK_TID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$CHUNK_RES" | grep -q '"status":"pending"'; then break; fi
+  sleep 0.5
+done
+printf '%s' "$CHUNK_RES" | python3 -c '
+import sys, json, base64
+r = json.load(sys.stdin)
+assert r.get("success") is True, r
+chunk = json.loads(r["output"])
+data = base64.b64decode(chunk["data"])
+ref = open("'"$REF_FILE"'", "rb").read()
+assert data == ref, "chunked download mismatch"
+'
+
+# General process metadata must run even without a privilege capability.
+PINFO_TASK="$(curl -fsS -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"process_info","args":""}')"
+PINFO_TID="$(printf '%s' "$PINFO_TASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+PINFO_RES=""
+for _ in $(seq 1 40); do
+  PINFO_RES="$(curl -fsS "$API/api/tasks/$PINFO_TID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$PINFO_RES" | grep -q '"status":"pending"'; then break; fi
+  sleep 0.5
+done
+printf '%s' "$PINFO_RES" | python3 -c '
+import sys, json
+r = json.load(sys.stdin)
+assert r.get("success") is True, r
+procs = json.loads(r["output"])["processes"]
+assert procs and all(p["pid"] > 0 for p in procs), "process_info returned no usable processes"
+'
+
+# A session with no engagement must be refused privilege-gated tasking before
+# anything reaches the implant.
+GATED_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"token_list","args":""}')"
+if [ "$GATED_STATUS" != "403" ]; then
+  echo "expected 403 for token_list without an engagement, got $GATED_STATUS" >&2
+  exit 1
+fi
+
+echo "E2E OK: mTLS $SID/$TID; HTTPS $HSID/$HTID; built payload $BSID/$BTID; chunked download OK; process_info OK; gated tasking denied"

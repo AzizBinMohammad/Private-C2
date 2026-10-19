@@ -92,6 +92,32 @@ func TestCheckTaskSafety_Scope(t *testing.T) {
 	}
 }
 
+func TestCheckTaskSafety_CapabilityGates(t *testing.T) {
+	oldSafety, oldOT := agentSafety, agentOT
+	oldOTAllow, oldCredAllow := agentAllowOT, agentAllowCredential
+	agentSafety, agentOT = nil, nil
+	agentAllowOT, agentAllowCredential = false, false
+	defer func() {
+		agentSafety, agentOT = oldSafety, oldOT
+		agentAllowOT, agentAllowCredential = oldOTAllow, oldCredAllow
+	}()
+
+	if err := checkTaskSafety(context.Background(), protocol.TaskWire{Type: protocol.TaskShell}); err != nil {
+		t.Fatalf("general task refused: %v", err)
+	}
+	if err := checkTaskSafety(context.Background(), protocol.TaskWire{Type: protocol.TaskOTDiscover}); err == nil {
+		t.Fatal("OT task allowed without the OT gate")
+	}
+	if err := checkTaskSafety(context.Background(), protocol.TaskWire{Type: "credential_dump"}); err == nil {
+		t.Fatal("credential task allowed without the credential gate")
+	}
+
+	agentAllowOT = true
+	if err := checkTaskSafety(context.Background(), protocol.TaskWire{Type: protocol.TaskOTDiscover}); err == nil {
+		t.Fatal("OT task allowed without a configured OT module")
+	}
+}
+
 func TestCheckTaskSafety_Allowlist(t *testing.T) {
 	oldSafety, oldAllow := agentSafety, agentAllowlist
 	agentSafety = nil

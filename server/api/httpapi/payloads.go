@@ -257,15 +257,28 @@ func buildImplant(db *gorm.DB, base models.PayloadArtifact, goos, goarch string)
 		return nil, fmt.Errorf("read implant key for payload embedding: %w", err)
 	}
 
+	var engagement models.Engagement
+	if base.EngagementID != "" {
+		_ = db.First(&engagement, "id = ?", base.EngagementID).Error
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	artifact, err := build.Build(ctx, root, build.BuildRequest{
-		TargetOS:      goos,
-		TargetArch:    goarch,
-		Format:        base.Format,
-		Transports:    base.Transports,
-		Mode:          base.Mode,
-		EngagementID:  base.EngagementID,
+		TargetOS:     goos,
+		TargetArch:   goarch,
+		Format:       base.Format,
+		Transports:   base.Transports,
+		Mode:         base.Mode,
+		EngagementID: base.EngagementID,
+
+		AllowPrivilegeEscalation: engagement.AllowPrivilegeEscalation,
+		AllowCredentialAccess:    engagement.AllowCredentialAccess,
+		AllowLateralMovement:     engagement.AllowLateralMovement,
+		AllowPersistence:         engagement.AllowPersistence,
+		AllowEvasion:             engagement.AllowEvasion,
+		AllowOTAssessment:        engagement.AllowOTAssessment,
+
 		CACertPEM:     caPEM,
 		ClientCertPEM: certPEM,
 		ClientKeyPEM:  keyPEM,

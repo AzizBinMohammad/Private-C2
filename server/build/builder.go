@@ -28,6 +28,13 @@ type BuildRequest struct {
 
 	EngagementID string `json:"engagement_id"`
 
+	AllowPrivilegeEscalation bool `json:"allow_privilege_escalation"`
+	AllowCredentialAccess    bool `json:"allow_credential_access"`
+	AllowLateralMovement     bool `json:"allow_lateral_movement"`
+	AllowPersistence         bool `json:"allow_persistence"`
+	AllowEvasion             bool `json:"allow_evasion"`
+	AllowOTAssessment        bool `json:"allow_ot_assessment"`
+
 	CACertPEM     []byte `json:"-"`
 	ClientCertPEM []byte `json:"-"`
 	ClientKeyPEM  []byte `json:"-"`
@@ -140,24 +147,30 @@ func configFromRequest(req BuildRequest) (protocol.ImplantConfig, string, error)
 	}
 
 	cfg := protocol.ImplantConfig{
-		Transport:      transport,
-		CACertPEM:      string(req.CACertPEM),
-		ClientCertPEM:  string(req.ClientCertPEM),
-		ClientKeyPEM:   string(req.ClientKeyPEM),
-		Insecure:       req.Insecure,
-		IntervalMs:     req.IntervalMs,
-		JitterPct:      req.JitterPct,
-		Mode:           req.Mode,
-		EngagementID:   req.EngagementID,
-		ScopeCIDRs:     req.ScopeCIDRs,
-		ScopeHosts:     req.ScopeHosts,
-		ScopeDomains:   req.ScopeDomains,
-		KillDate:       req.KillDate,
-		WindowStart:    req.WindowStart,
-		WindowEnd:      req.WindowEnd,
-		DataQuotaBytes: req.DataQuotaBytes,
-		RemoteKillURL:  req.RemoteKillURL,
-		SafeMode:       req.SafeMode,
+		Transport:                transport,
+		CACertPEM:                string(req.CACertPEM),
+		ClientCertPEM:            string(req.ClientCertPEM),
+		ClientKeyPEM:             string(req.ClientKeyPEM),
+		Insecure:                 req.Insecure,
+		IntervalMs:               req.IntervalMs,
+		JitterPct:                req.JitterPct,
+		Mode:                     req.Mode,
+		EngagementID:             req.EngagementID,
+		AllowPrivilegeEscalation: req.AllowPrivilegeEscalation,
+		AllowCredentialAccess:    req.AllowCredentialAccess,
+		AllowLateralMovement:     req.AllowLateralMovement,
+		AllowPersistence:         req.AllowPersistence,
+		AllowEvasion:             req.AllowEvasion,
+		AllowOTAssessment:        req.AllowOTAssessment,
+		ScopeCIDRs:               req.ScopeCIDRs,
+		ScopeHosts:               req.ScopeHosts,
+		ScopeDomains:             req.ScopeDomains,
+		KillDate:                 req.KillDate,
+		WindowStart:              req.WindowStart,
+		WindowEnd:                req.WindowEnd,
+		DataQuotaBytes:           req.DataQuotaBytes,
+		RemoteKillURL:            req.RemoteKillURL,
+		SafeMode:                 req.SafeMode,
 	}
 	if transport == "mtls" {
 		cfg.ServerAddr = host

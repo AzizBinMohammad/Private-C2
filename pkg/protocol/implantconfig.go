@@ -19,6 +19,13 @@ type ImplantConfig struct {
 
 	EngagementID string `json:"engagement_id,omitempty"`
 
+	AllowPrivilegeEscalation bool `json:"allow_privilege_escalation,omitempty"`
+	AllowCredentialAccess    bool `json:"allow_credential_access,omitempty"`
+	AllowLateralMovement     bool `json:"allow_lateral_movement,omitempty"`
+	AllowPersistence         bool `json:"allow_persistence,omitempty"`
+	AllowEvasion             bool `json:"allow_evasion,omitempty"`
+	AllowOTAssessment        bool `json:"allow_ot_assessment,omitempty"`
+
 	ScopeCIDRs   []string `json:"scope_cidrs,omitempty"`
 	ScopeHosts   []string `json:"scope_hosts,omitempty"`
 	ScopeDomains []string `json:"scope_domains,omitempty"`

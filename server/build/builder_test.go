@@ -38,16 +38,21 @@ func TestParseTransports(t *testing.T) {
 
 func TestConfigFromRequest(t *testing.T) {
 	cfg, transport, err := configFromRequest(BuildRequest{
-		Transports:   "mtls@c2.example:4444",
-		IntervalMs:   1000,
-		JitterPct:    10,
-		EngagementID: "eng-1",
+		Transports:            "mtls@c2.example:4444",
+		IntervalMs:            1000,
+		JitterPct:             10,
+		EngagementID:          "eng-1",
+		AllowOTAssessment:     true,
+		AllowCredentialAccess: true,
 	})
 	if err != nil {
 		t.Fatalf("configFromRequest: %v", err)
 	}
 	if transport != "mtls" || cfg.ServerAddr != "c2.example:4444" || cfg.IntervalMs != 1000 {
 		t.Fatalf("unexpected mtls config: %s %+v", transport, cfg)
+	}
+	if !cfg.AllowOTAssessment || !cfg.AllowCredentialAccess {
+		t.Fatalf("capability gates missing from embedded config: %+v", cfg)
 	}
 
 	cfg, transport, err = configFromRequest(BuildRequest{Transports: "https@c2.example:443"})

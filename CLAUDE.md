@@ -95,6 +95,8 @@ Private-C2/
                            #   system info collection (platform-specific: darwin,
                            #   linux, windows, default)
     modules/
+      credential/          # Read-only credential-source enumeration and
+                           #   operator-directed secret reads (gated)
       filesystem/          # File operations module
       logs/                # Log collection (platform-specific + timestomping)
       network/             # Network recon module
@@ -110,7 +112,9 @@ Private-C2/
                            #   testing, vulnerability scanning, compliance analysis,
                            #   topology mapping, traffic capture, HMI scanning,
                            #   wireless detection, PLC logic analysis, serial comms
-      process/             # Process listing (platform-specific)
+      process/             # Process list/kill/suspend/resume (platform-specific)
+      token/               # Windows token list/steal/make/impersonate/revert;
+                           #   non-Windows builds return ErrUnsupported
       screenshot/          # Screenshot capture
       shell/               # Shell command execution (Unix/Windows)
     safety/
@@ -352,6 +356,9 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
 - `docs/phase1-status-2026-10-19.md` records the first Phase 1 implementation
   cut, what was verified, and what remains (HTTPS carrier, embedded payload
   builder, audit writer/export, SSE, config wiring, migration ledger).
+- `docs/phase2-status-2026-10-19.md` records the Phase 2 cut: engagement
+  capability gates, OT task execution, identity/chunked-transfer tasks, and
+  process/token operations. Token impersonation is task-scoped by design.
 - `docs/prompt-template.md` is the template for requesting new features, and lists the project facts worth stating up front (notably: which packages are live vs. unreachable).
 
 ### Writing Requirements for New Work
