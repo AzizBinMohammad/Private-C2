@@ -178,8 +178,11 @@ func (sh *sessionHandler) handleTaskResult(w http.ResponseWriter, r *http.Reques
 	}
 	result := sh.implantServer.GetResult(taskID)
 	if result == nil && sh.db != nil {
+		// Find (rather than First) avoids GORM logging a "record not found"
+		// error on every poll while a task is still running.
 		var row models.TaskResult
-		if err := sh.db.First(&row, "task_id = ?", taskID).Error; err == nil {
+		res := sh.db.Where("task_id = ?", taskID).Limit(1).Find(&row)
+		if res.Error == nil && res.RowsAffected == 1 {
 			writeJSON(w, http.StatusOK, c2.TaskResult{
 				TaskID:      row.TaskID,
 				SessionID:   row.SessionID,

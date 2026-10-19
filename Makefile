@@ -17,7 +17,7 @@ IMPLANT_BIN := $(BIN_DIR)/implant
 
 DOCKER_TAG  ?= private-c2:latest
 
-.PHONY: all build server client builder run test test-integration lint proto docker clean cross-compile help
+.PHONY: all build server client builder run test test-integration e2e-smoke lint proto docker clean cross-compile help
 
 all: build
 
@@ -55,6 +55,9 @@ test:  ## Run all unit tests
 
 test-integration:  ## Run integration tests (requires full stack)
 	cd tests && $(GO) test -tags integration -count=1 -race -timeout 300s ./integration/...
+
+e2e-smoke:  ## Run a real server+implant end-to-end smoke test
+	@bash scripts/e2e-smoke.sh
 
 # ---- Lint -----------------------------------------------------------------
 
