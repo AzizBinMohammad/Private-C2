@@ -26,6 +26,24 @@ const (
 
 	TaskCredentialEnum = "credential_enum"
 	TaskCredentialRead = "credential_read"
+	TaskCredentialDump = "credential_dump"
+
+	TaskLateralSSH   = "lateral_ssh"
+	TaskPivotSocks   = "pivot_socks"
+	TaskPivotPortfwd = "pivot_portfwd"
+
+	TaskPowerShell      = "powershell"
+	TaskPython          = "python"
+	TaskExecuteAssembly = "execute_assembly"
+
+	TaskEvasionTimestomp = "evasion_timestomp"
+	TaskEvasionCleanup   = "evasion_cleanup"
+
+	TaskPersistShell    = "persist_shell"
+	TaskPersistSystemd  = "persist_systemd"
+	TaskPersistCron     = "persist_cron"
+	TaskPersistRegistry = "persist_registry"
+	TaskPersistSchtasks = "persist_schtasks"
 
 	TaskProcessInfo      = "process_info"
 	TaskProcessSuspend   = "process_suspend"
@@ -78,6 +96,20 @@ var implementedTaskTypes = []string{
 	TaskOTCredentials,
 	TaskCredentialEnum,
 	TaskCredentialRead,
+	TaskCredentialDump,
+	TaskLateralSSH,
+	TaskPivotSocks,
+	TaskPivotPortfwd,
+	TaskPowerShell,
+	TaskPython,
+	TaskExecuteAssembly,
+	TaskEvasionTimestomp,
+	TaskEvasionCleanup,
+	TaskPersistShell,
+	TaskPersistSystemd,
+	TaskPersistCron,
+	TaskPersistRegistry,
+	TaskPersistSchtasks,
 	TaskProcessInfo,
 	TaskProcessSuspend,
 	TaskProcessResume,
@@ -154,7 +186,8 @@ func CategoryFor(taskType string) TaskCategory {
 		return CategoryOT
 	case strings.HasPrefix(taskType, "credential_"), taskType == "hashdump", taskType == "lsass_dump":
 		return CategoryCredential
-	case strings.HasPrefix(taskType, "lateral_"), taskType == "psexec", taskType == "winrm", taskType == "wmi":
+	case strings.HasPrefix(taskType, "lateral_"), strings.HasPrefix(taskType, "pivot_"),
+		taskType == "psexec", taskType == "winrm", taskType == "wmi":
 		return CategoryLateral
 	case strings.HasPrefix(taskType, "persist_"):
 		return CategoryPersistence

@@ -7,6 +7,7 @@ package credential
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,6 +36,19 @@ type Finding struct {
 	Name  string `json:"name"`
 	Value string `json:"value,omitempty"`
 	Note  string `json:"note,omitempty"`
+}
+
+// ErrDumpUnsupported is returned by Dump on non-Windows builds.
+var ErrDumpUnsupported = errors.New("credential dumping requires Windows")
+
+// DumpResult describes a dump written by the target. The operator retrieves it
+// with the chunked download tasks.
+type DumpResult struct {
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+	Note   string `json:"note,omitempty"`
 }
 
 // Report is the result of credential_enum.

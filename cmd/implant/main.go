@@ -598,9 +598,12 @@ func checkTaskSafety(ctx context.Context, t protocol.TaskWire) error {
 			return fmt.Errorf("refused: evasion is not enabled for this engagement")
 		}
 	}
-	if agentAllowlist != nil && agentAllowlist.IsEnabled() && t.Type == protocol.TaskShell {
-		if ok, reason := agentAllowlist.IsAllowed(t.Args); !ok {
-			return fmt.Errorf("refused by command allowlist: %s", reason)
+	if agentAllowlist != nil && agentAllowlist.IsEnabled() {
+		switch t.Type {
+		case protocol.TaskShell, protocol.TaskPowerShell, protocol.TaskPython:
+			if ok, reason := agentAllowlist.IsAllowed(t.Args); !ok {
+				return fmt.Errorf("refused by command allowlist: %s", reason)
+			}
 		}
 	}
 	if agentSafety == nil {

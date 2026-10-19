@@ -433,3 +433,65 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
   requires a dedicated OS-thread-locked worker and a command queue. Do not
   remove the defer-revert, share the token store across processes, or loosen
   the privilege category without an engagement-level gate.
+
+## Pivot Scope Is Enforced per Connection (2026-10-19)
+
+* **Decision**: `pivot_socks` and `pivot_portfwd` call the implant's
+  `SafetyChecker.CheckWithTarget` for every CONNECT/dial, not only when the
+  pivot starts. The SOCKS server supports CONNECT only and replies `0x02`
+  (connection not allowed) when the destination is outside scope.
+* **Why**: The operator chooses the destination after the listener is running.
+  A start-time check would authorize an unlimited set of destinations from one
+  task and silently bypass engagement scope.
+* **What would conflict with it**: Adding UDP ASSOCIATE or BIND, or caching
+  allowed destinations, requires an equivalent per-destination check.
+
+## Credential Dumps Stay on the Target Until Retrieved (2026-10-19)
+
+* **Decision**: `credential_dump` writes a minidump or registry hive to a
+  temporary path on the target and returns its path, size, and SHA-256. The
+  operator retrieves it with `download_stat`/`download_chunk`, which enforce
+  the data quota, and can promote it to loot.
+* **Why**: Task results are size-limited and persist in the task-result table;
+  embedding a multi-hundred-megabyte dump in a result would break the wire
+  protocol and the database. The chunked path already provides resumability
+  and hashing.
+* **What would conflict with it**: A dedicated binary task-result channel must
+  preserve quota enforcement, hashing, and audit attribution.
+
+## Persistence Artifacts Have Deterministic IDs (2026-10-19)
+
+* **Decision**: Every persistence artifact derives its ID from
+  `sha256(kind + "\x00" + name)` and embeds it in a marker (shell block, unit
+  comment, crontab comment) or a prefixed Windows name (`pc2-<name>`). `add`,
+  `remove`, and `list` all use that ID.
+* **Why**: Cleanup must work after a server restart or from a different
+  operator session, without a server-side registry of target state. Determinism
+  makes removal idempotent and auditable.
+* **What would conflict with it**: Renaming an artifact without removing the
+  old one creates a second artifact; operators must remove by the original
+  name. `dry_run` exists for review before writing.
+
+## Loot: Metadata in the Database, Blobs on Disk (2026-10-19)
+
+* **Decision**: `LootArtifact` stores engagement/session/task attribution,
+  kind, name, SHA-256, size, and a private path. Bytes live under
+  `PC2_LOOT_DIR` (default `./loot`, 0700) with random UUID filenames.
+* **Why**: Large blobs in SQLite/Postgres make backups, queries, and the audit
+  path slow. The path is never serialized to operators; downloads go through
+  the authenticated API, which also checks the credential gate.
+* **What would conflict with it**: Serving loot from a static file server would
+  bypass RBAC and the credential gate. A distributed deployment needs shared
+  storage or an object-store adapter.
+
+## Execute-Assembly Runs in PowerShell (2026-10-19)
+
+* **Decision**: `execute_assembly` base64-encodes the assembly and invokes its
+  entry point through `Reflection.Assembly.Load` in a PowerShell
+  `-EncodedCommand` process. The implant does not host the CLR.
+* **Why**: In-process CLR hosting requires CGO and a Windows toolchain, and
+  cannot be verified here. The PowerShell path keeps `CGO_ENABLED=0` and gives
+  operators a working primitive with an honest limitation.
+* **What would conflict with it**: A real in-process CLR host must preserve the
+  same capability gate and must not be presented as equivalent in-memory
+  execution.

@@ -115,6 +115,12 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 	api.HandleFunc("/api/operators", oh.handleOperators)
 	api.HandleFunc("/api/operators/", oh.handleOperatorDetail)
 
+	// ───────────────── Loot ─────────────────
+
+	lootH := newLootHandler(db, auditor)
+	api.HandleFunc("/api/loot", lootH.handleLoot)
+	api.HandleFunc("/api/loot/", lootH.handleLootDetail)
+
 	// ───────────────── Server Status ─────────────────
 
 	st := &statusHandler{implantServer: implantServer}
@@ -150,6 +156,8 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 	mux.Handle("/api/payloads/", protected)
 	mux.Handle("/api/operators", protected)
 	mux.Handle("/api/operators/", protected)
+	mux.Handle("/api/loot", protected)
+	mux.Handle("/api/loot/", protected)
 	mux.Handle("/api/server/", protected)
 	mux.Handle("/api/audit", protected)
 	mux.Handle("/api/audit/", protected)

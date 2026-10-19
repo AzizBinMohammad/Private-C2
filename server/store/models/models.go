@@ -216,3 +216,20 @@ type Role struct {
 	Description string `json:"description"`
 	Permissions string `gorm:"type:text" json:"permissions"` // JSON
 }
+
+// LootArtifact is a credential, file, screenshot, or finding captured during
+// an engagement. The blob lives in the server's loot directory; only its
+// metadata is stored in the database. Path is never serialized to operators.
+type LootArtifact struct {
+	Base
+	EngagementID string `gorm:"index" json:"engagement_id"`
+	SessionID    string `gorm:"index" json:"session_id,omitempty"`
+	TaskID       string `gorm:"index" json:"task_id,omitempty"`
+	Operator     string `json:"operator"`
+	Kind         string `gorm:"index" json:"kind"` // credential, file, screenshot, ot_finding, task, other
+	Name         string `json:"name"`
+	SHA256       string `gorm:"index" json:"sha256"`
+	Size         int64  `json:"size"`
+	Path         string `gorm:"type:text" json:"-"`
+	Note         string `gorm:"type:text" json:"note,omitempty"`
+}

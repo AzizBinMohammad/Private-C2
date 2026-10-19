@@ -95,9 +95,14 @@ Private-C2/
                            #   system info collection (platform-specific: darwin,
                            #   linux, windows, default)
     modules/
-      credential/          # Read-only credential-source enumeration and
-                           #   operator-directed secret reads (gated)
+      credential/          # Credential-source enumeration, secret reads, and
+                           #   Windows LSASS/registry dumps (gated)
       filesystem/          # File operations module
+      lateral/             # SSH lateral movement adapter (gated)
+      persist/             # Shell/systemd/cron and Windows registry/schtasks
+                           #   persistence with deterministic artifact IDs
+      pivot/               # SOCKS5 proxy and TCP port forward with
+                           #   per-connection scope checks
       logs/                # Log collection (platform-specific + timestomping)
       network/             # Network recon module
       nmap/                # nmap on the target. nmap.go: availability check
@@ -357,8 +362,12 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
   cut, what was verified, and what remains (HTTPS carrier, embedded payload
   builder, audit writer/export, SSE, config wiring, migration ledger).
 - `docs/phase2-status-2026-10-19.md` records the Phase 2 cut: engagement
-  capability gates, OT task execution, identity/chunked-transfer tasks, and
-  process/token operations. Token impersonation is task-scoped by design.
+  capability gates, OT task execution, identity/chunked-transfer tasks,
+  process/token operations, credential access, SSH lateral movement,
+  SOCKS5/port-forward pivots, scripting, timestomping, persistence, and the
+  loot store. It also lists what is deliberately not delivered (BOF/COFF,
+  in-process CLR, Windows memory evasion, SMB/WinRM/WMI) and that Windows
+  paths are cross-compiled but not run on a Windows lab host here.
 - `docs/prompt-template.md` is the template for requesting new features, and lists the project facts worth stating up front (notably: which packages are live vs. unreachable).
 
 ### Writing Requirements for New Work

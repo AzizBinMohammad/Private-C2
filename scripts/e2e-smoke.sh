@@ -31,6 +31,7 @@ IMPLANT_LOG="$(mktemp /tmp/pc2-implant-XXXX.log)"
 HTTPS_IMPLANT_LOG="$(mktemp /tmp/pc2-implant-https-XXXX.log)"
 BUILT_LOG="$(mktemp /tmp/pc2-implant-built-XXXX.log)"
 BUILT_PAYLOAD="$(mktemp -d /tmp/pc2-built-XXXXXX)/built-implant"
+LOOT_DIR="$(mktemp -d /tmp/pc2-loot-XXXXXX)"
 SRV=""
 IMP=""
 IMP2=""
@@ -43,11 +44,11 @@ cleanup() {
   if [ -n "$IMP3" ]; then kill "$IMP3" 2>/dev/null || true; fi
   wait 2>/dev/null || true
   rm -f "$DB"
-  rm -rf "$(dirname "$BUILT_PAYLOAD")"
+  rm -rf "$(dirname "$BUILT_PAYLOAD")" "$LOOT_DIR"
 }
 trap cleanup EXIT
 
-./bin/private-c2-server \
+PC2_LOOT_DIR="$LOOT_DIR" ./bin/private-c2-server \
   --listen "127.0.0.1:${BASE_PORT}" \
   --api "127.0.0.1:${API_PORT}" \
   --metrics-addr "127.0.0.1:${METRICS_PORT}" \
@@ -280,4 +281,33 @@ if [ "$GATED_STATUS" != "403" ]; then
   exit 1
 fi
 
-echo "E2E OK: mTLS $SID/$TID; HTTPS $HSID/$HTID; built payload $BSID/$BTID; chunked download OK; process_info OK; gated tasking denied"
+# Loot store: create an engagement, store a blob, list it, download it, and
+# delete it. The blob round-trip proves the metadata/blob split works.
+ENG_ID="$(curl -fsS -X POST "$API/api/engagements" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"e2e-loot","status":"active","authorization_ref":"E2E"}' |
+  python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+
+LOOT_DATA="$(printf 'loot-%s' "$ENG_ID" | base64 -w0)"
+LOOT_JSON="$(curl -fsS -X POST "$API/api/loot" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"engagement_id\":\"$ENG_ID\",\"kind\":\"file\",\"name\":\"e2e.txt\",\"data\":\"$LOOT_DATA\"}")"
+LOOT_ID="$(printf '%s' "$LOOT_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+
+curl -fsS "$API/api/loot/$LOOT_ID/download" -H "Authorization: Bearer $TOKEN" \
+  | python3 -c '
+import sys, base64
+assert sys.stdin.buffer.read().decode() == base64.b64decode("'"$LOOT_DATA"'").decode(), "loot download mismatch"
+'
+
+curl -fsS -X DELETE "$API/api/loot/$LOOT_ID" -H "Authorization: Bearer $TOKEN" >/dev/null
+MISSING_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' "$API/api/loot/$LOOT_ID" \
+  -H "Authorization: Bearer $TOKEN")"
+if [ "$MISSING_STATUS" != "404" ]; then
+  echo "expected 404 for deleted loot, got $MISSING_STATUS" >&2
+  exit 1
+fi
+
+echo "E2E OK: mTLS $SID/$TID; HTTPS $HSID/$HTID; built payload $BSID/$BTID; chunked download OK; process_info OK; gated tasking denied; loot round-trip OK"

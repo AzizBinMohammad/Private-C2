@@ -14,6 +14,16 @@ import (
 // tokenManager owns tokens stolen or created during this implant's lifetime.
 var tokenManager = token.NewManager()
 
+// unmarshalArgs decodes a JSON task argument object; an empty argument string
+// is treated as an empty object so status/list actions need no payload.
+func unmarshalArgs(args string, v any) error {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		trimmed = "{}"
+	}
+	return json.Unmarshal([]byte(trimmed), v)
+}
+
 func parsePID(args string) (int, error) {
 	pid, err := strconv.Atoi(strings.TrimSpace(args))
 	if err != nil || pid <= 0 {
