@@ -28,6 +28,8 @@ const (
 	EventKillSwitch       EventType = "killswitch"
 	EventScopeViolation   EventType = "scope.violation"
 	EventEngagementCreate EventType = "engagement.create"
+	EventOTImport         EventType = "ot.import"
+	EventOTReport         EventType = "ot.report"
 )
 
 type Entry struct {

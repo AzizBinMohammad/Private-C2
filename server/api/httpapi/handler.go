@@ -134,7 +134,8 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 
 	// ───────────────── OT/ICS ─────────────────
 
-	oth := &otHandler{db: db}
+	oth := &otHandler{db: db, auditor: auditor}
+	api.HandleFunc("/api/ot/import", oth.handleOTImport)
 	api.HandleFunc("/api/ot/assets", oth.handleOTAssets)
 	api.HandleFunc("/api/ot/vulns", oth.handleOTVulns)
 	api.HandleFunc("/api/ot/credentials", oth.handleOTCredentials)

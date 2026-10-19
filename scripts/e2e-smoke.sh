@@ -286,7 +286,7 @@ fi
 ENG_ID="$(curl -fsS -X POST "$API/api/engagements" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"e2e-loot","status":"active","authorization_ref":"E2E"}' |
+  -d '{"name":"e2e-loot","status":"active","authorization_ref":"E2E","allow_ot_assessment":true}' |
   python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
 
 LOOT_DATA="$(printf 'loot-%s' "$ENG_ID" | base64 -w0)"
@@ -310,4 +310,22 @@ if [ "$MISSING_STATUS" != "404" ]; then
   exit 1
 fi
 
-echo "E2E OK: mTLS $SID/$TID; HTTPS $HSID/$HTID; built payload $BSID/$BTID; chunked download OK; process_info OK; gated tasking denied; loot round-trip OK"
+# OT import + report: persist a read-only finding and render a Markdown report.
+curl -fsS -X POST "$API/api/ot/import" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"engagement_id\":\"$ENG_ID\",\"type\":\"asset\",\"items\":[{\"ip\":\"10.10.0.5\",\"vendor\":\"Siemens\",\"role\":\"PLC\",\"protocols\":[\"s7\"]}]}" \
+  | python3 -c 'import sys,json; r=json.load(sys.stdin); assert r["created"]==1, r'
+
+OT_REPORT="$(curl -fsS -X POST "$API/api/ot/reports" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"engagement_id\":\"$ENG_ID\",\"format\":\"markdown\",\"title\":\"E2E OT\"}")"
+printf '%s' "$OT_REPORT" | python3 -c '
+import sys, json
+r = json.load(sys.stdin)
+assert r["asset_count"] == 1, r
+assert "# E2E OT" in r["report_data"], "report is not Markdown"
+'
+
+echo "E2E OK: mTLS $SID/$TID; HTTPS $HSID/$HTID; built payload $BSID/$BTID; chunked download OK; process_info OK; gated tasking denied; loot round-trip OK; OT import/report OK"

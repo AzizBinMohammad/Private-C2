@@ -321,6 +321,52 @@ func main() {
 			payload, _ := json.Marshal(req)
 			cmdTask(client, activeSession.ID, "execute_assembly", string(payload))
 
+		case "otimport":
+			if len(args) < 2 {
+				printError("Usage: otimport <asset|vuln|credential|hmi|wireless|compliance|topology|segmentation> <task-id>")
+				continue
+			}
+			var result map[string]any
+			if err := client.Post("/api/ot/import", map[string]string{
+				"type": args[0], "task_id": args[1],
+			}, &result); err != nil {
+				printError(fmt.Sprintf("Failed to import OT findings: %v", err))
+				continue
+			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+
+		case "otreports":
+			if len(args) >= 2 && args[0] == "generate" {
+				format := "markdown"
+				if len(args) >= 3 {
+					format = args[2]
+				}
+				var report map[string]any
+				if err := client.Post("/api/ot/reports", map[string]string{
+					"engagement_id": args[1], "format": format,
+				}, &report); err != nil {
+					printError(fmt.Sprintf("Failed to generate OT report: %v", err))
+					continue
+				}
+				data, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Println(string(data))
+				continue
+			}
+			var reports []map[string]any
+			if err := client.Get("/api/ot/reports", &reports); err != nil {
+				printError(fmt.Sprintf("Failed to list OT reports: %v", err))
+				continue
+			}
+			if len(reports) == 0 {
+				printInfo("No OT reports stored.")
+				continue
+			}
+			for _, r := range reports {
+				fmt.Printf("%v  %-12v assets=%v vulns=%v risk=%v\n",
+					r["id"], r["format"], r["asset_count"], r["vuln_count"], r["risk_score"])
+			}
+
 		case "loot":
 			if len(args) < 1 {
 				printError("Usage: loot <list|add|get|download|rm> [args]")
@@ -576,6 +622,8 @@ func printHelp() {
 		{"credread <path>", "Read one credential file named by the operator (gated)"},
 		{"dump <kind>", "Dump lsass or a SAM/SECURITY/SYSTEM hive on Windows (gated)"},
 		{"loot list|add <task>|get <id>|download <id>|rm <id>", "Manage engagement loot on the server"},
+		{"otimport <type> <task-id>", "Persist OT task findings (asset, vuln, credential, ...)"},
+		{"otreports [generate <engagement> [format]]", "List or generate OT assessment reports"},
 		{"assembly <file> [args...]", "Load a .NET assembly in PowerShell on Windows"},
 		{"tokens", "List the current and stored tokens"},
 		{"steal <pid>", "Duplicate a process token and store it"},
