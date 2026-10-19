@@ -296,3 +296,38 @@ R13. **Data race on `ImplantSession` (fixed).** `ListSessions`/`GetSession` now
     changes the task model; the timeout values in `implant/modules/nmap`,
     `cmd/client` (`scanPollTimeout`) and the portal (`taskPollAttempts`) are
     sized to match each other and must move together.
+
+---
+
+## Phase 1 progress — 2026-10-19
+
+Branch `feat/redteam-workflow`. Full detail in
+`docs/phase1-status-2026-10-19.md`.
+
+### Resolved in this cut
+
+- Unbounded frame allocation and missing registration deadlines.
+- Task loss on a failed tasking write; results accepted from the wrong session.
+- Duplicate live sessions for a reconnecting implant.
+- Listener start/stop races and active connections surviving stop.
+- In-memory-only sessions/tasks/results; queued tasks now survive reconnect and
+  restart.
+- `MarkStale` marking every session stale.
+- Operators not hydrated from the DB; deleted operators keeping credentials;
+  no logout/revocation.
+- No authorization on the REST API; added a deny-by-default role matrix.
+- Engagement scope/kill switch not enforced at task queue time; the kill switch
+  now closes sessions and blocks tasking.
+- Inline serial task execution and unsupported portal task types.
+
+### Still open
+
+- HTTPS/DNS/WireGuard carriers (only mTLS accepts the framed protocol).
+- Payloads are not self-contained: `buildImplant()` embeds no server address,
+  trust material, mode, sleep/jitter, or engagement.
+- Audit has no live writer, two incompatible hash implementations remain, and
+  `/api/audit/export` is missing.
+- Config is flag-based; `server/config` is still unused by `cmd/server`.
+- SSE/event-bus integration and metrics instrumentation.
+- Migration ledger / pre-DDL SQLite backup.
+- `client/cli/commands` remains dead code; `cmd/mcp` still has its own client.

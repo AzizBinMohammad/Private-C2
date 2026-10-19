@@ -4,13 +4,15 @@ A full-featured Command and Control framework built in Go 1.23 for **authorized 
 
 ## Features
 
-- **Multi-transport C2**: mTLS, HTTPS (with domain fronting), DNS, WireGuard, and peer-to-peer pivot
-- **Engagement scoping**: CIDR, hostname, and domain-based scope enforcement with kill switch (fail-closed)
+- **C2 transport**: a live mTLS listener with protocol v2 negotiation; HTTPS, DNS, WireGuard, and pivot transport libraries exist but are not yet wired into the live listener path
+- **Engagement scoping**: CIDR, hostname, and domain-based scope enforcement with an operational kill switch (closes sessions, blocks tasking)
 - **Cryptography**: XChaCha20-Poly1305 AEAD, X25519 key exchange, Ed25519 signing, ECDSA P-384 PKI
-- **Cross-platform implant**: Windows, Linux, macOS, FreeBSD, OpenBSD, NetBSD across amd64/arm64/386
-- **Build pipeline**: Server-side cross-compilation with configurable features, transports, and obfuscation
+- **Cross-platform implant**: Windows, Linux, macOS, FreeBSD, OpenBSD, NetBSD across amd64/arm64/386 (mTLS over CGO-free Go builds)
+- **Durable state**: sessions, tasks, dispatches, and results persist to SQLite/PostgreSQL; queued tasks rebind after reconnect/restart
+- **Background tasking**: bounded worker pool with per-task timeouts, panic recovery, output caps, and continued check-ins
+- **Build pipeline**: server-side cross-compilation (payload configuration embedding is still in progress)
 - **mTLS implant listener**: client certificates are required and verified against the engagement CA
-- **RBAC**: admin, operator, ot-operator, builder, observer roles — defined in `server/api/middleware/rbac.go`, **not yet enforced on the REST API** (see `docs/known-issues.md` #15)
+- **RBAC**: admin, operator, ot-operator, builder, observer roles enforced on the REST API (`server/api/authz`)
 - **OT/ICS assessment**: 17 industrial protocol clients (Modbus, OPC UA, S7, DNP3, etc.), all strictly read-only
 - **Audit trail**: Append-only with SHA256 hash chaining, exportable as JSON/CEF/LEEF
 - **Compliance**: IEC 62443, NIST SP 800-82, NERC CIP gap analysis

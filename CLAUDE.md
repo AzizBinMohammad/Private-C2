@@ -318,8 +318,22 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
 - **Session manager not integrated**: `server/core/sessions.go` (state machine with health checking) is not used by `server/c2/handler.go` which tracks sessions in its own maps.
 - **Integration tests are all stubs**: every test in `tests/integration/` calls `t.Skip("requires full server/implant stack")`.
 - **No unit tests** for `server/`, `client/`, or `implant/` packages. Only `pkg/` has unit tests.
-- **In-memory task results**: task queues and results in `ImplantServer` are not persisted, so they're lost on server restart.
+- ~~**In-memory task results**~~ **PARTIALLY RESOLVED (2026-10-19)**: sessions,
+  tasks, dispatches, and results now persist through `c2.Persistence` /
+  `c2.GORMPersistence`, and queued tasks are rebound by `ImplantID`. See
+  `docs/phase1-status-2026-10-19.md`.
 - **Builder is a stub**: `cmd/builder/main.go` only prints usage and exits.
+  Payloads are still built by `buildImplant()` without embedded configuration.
+- **HTTPS/DNS/WireGuard carriers are not live**: only mTLS accepts the framed
+  protocol. `server/c2/listener/*` uses a different session model.
+- **Audit writer is missing**: audit entries are still read-only; the two hash
+  implementations remain incompatible.
+- **RBAC is now enforced on the REST API** via `server/api/authz` (roles:
+  `admin`, `operator`, `builder`, `observer`, `ot-operator`). Engagement policy
+  (scope, time window, authorized techniques, kill switch) is enforced before
+  task queueing; the implant re-checks its own safety configuration.
+- **Protocol v2 is negotiated**: v1 JSON remains supported; v2 adds session
+  tokens, server-controlled heartbeat, kill tasking, and per-task timeouts.
 
 ### Security Concerns
 - Default `admin`/`admin` credentials are hardcoded in `auth.go:ensureDefaultUser()`.
@@ -333,6 +347,9 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
 ### Known Issue Tracking
 - `docs/known-issues.md` is the authoritative defect list.
 - `docs/audit-2026-10-15.md` is the full audit: per-phase verification, CLI↔UI feature matrix, and prioritized roadmap.
+- `docs/phase1-status-2026-10-19.md` records the first Phase 1 implementation
+  cut, what was verified, and what remains (HTTPS carrier, embedded payload
+  builder, audit writer/export, SSE, config wiring, migration ledger).
 - `docs/prompt-template.md` is the template for requesting new features, and lists the project facts worth stating up front (notably: which packages are live vs. unreachable).
 
 ### Writing Requirements for New Work

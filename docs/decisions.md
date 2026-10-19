@@ -312,3 +312,65 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
   `scanPollTimeout` or the portal's `taskPollAttempts` would make a running scan
   invisible before it finishes. Persisting results (a planned follow-up) needs a
   result hook in `server/c2`, which today holds live state only in memory.
+
+---
+
+## Protocol v2: Additive Versioning (2026-10-19)
+
+* **Decision**: v2 fields are additive JSON fields negotiated at registration.
+  A missing `protocol_version` is v1. The implant starts in v1 mode and uses v2
+  message types only after the ack advertises a negotiated version >= 2. No v1
+  JSON key is renamed or removed.
+* **Why**: Existing implants must keep working. Additive fields are ignored by
+  old decoders, and the negotiated version prevents a new peer from sending a
+  message an old peer cannot parse.
+* **What would conflict with it**: Renaming fields, removing v1 message shapes,
+  or sending v2 message types before negotiation. Golden JSON fixtures and a
+  legacy client test guard this.
+
+## Durable C2 State: Write-Through, Fail-Closed Queueing (2026-10-19)
+
+* **Decision**: `server/c2.Persistence` is an interface implemented by
+  `GORMPersistence`. Sessions, check-ins, disconnects, task queue/dispatch, and
+  results are written through. A task that cannot be persisted is not accepted
+  into the in-memory queue. Queued tasks are rebound to a reconnecting implant
+  by `ImplantID`.
+* **Why**: The previous in-memory maps lost operator intent on restart, and a
+  failed DB write could leave a task that existed only in memory.
+* **What would conflict with it**: Treating the DB as best-effort for queueing,
+  or rebinding by session ID (which changes on every reconnect).
+
+## HTTP Authorization and Engagement Policy (2026-10-19)
+
+* **Decision**: The REST API uses a deny-by-default role/permission matrix
+  (`server/api/authz`) after bearer authentication. Roles are `admin`,
+  `operator`, `builder`, `observer`, and `ot-operator`. Before a task is
+  queued, the server validates engagement status, kill switch, time window,
+  authorized techniques, and scope; the implant independently re-checks its
+  own safety configuration.
+* **Why**: Authentication alone let any token manage operators or task any
+  implant. Defense in depth matters because legacy implants cannot be trusted
+  to enforce policy.
+* **What would conflict with it**: Adding a protected route without a
+  permission entry (it is denied), or accepting an operator identity from a
+  request body instead of the token.
+
+## Background Task Execution (2026-10-19)
+
+* **Decision**: The implant executes tasks on a bounded `implant/task.Runner`
+  with per-task timeout, panic recovery, duplicate-ID suppression, and output
+  truncation. Results are flushed at the start of each beacon cycle.
+* **Why**: Inline execution blocked check-ins for the duration of a scan or
+  shell command, making the session look stale and delaying all other work.
+* **What would conflict with it**: Reintroducing a synchronous task loop, or
+  removing the duplicate-ID guard while dispatch retries remain possible.
+
+## Kill Switch Semantics (2026-10-19)
+
+* **Decision**: Activating an engagement kill switch marks it in the DB and
+  closes matching live sessions, reaps their queues/results, blocks further
+  tasking, and sends v2 implants a kill tasking. It is not a status flag alone.
+* **Why**: The previous endpoint reported success while implants kept
+  beaconing.
+* **What would conflict with it**: Treating the DB status as the only action,
+  or claiming remote termination of v1 implants (v1 has no kill message).
