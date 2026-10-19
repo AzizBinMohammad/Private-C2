@@ -2,6 +2,7 @@ package envelope
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 )
 
@@ -65,13 +66,32 @@ func TestFrameMultipleMessages(t *testing.T) {
 }
 
 func TestWriteFrameMaxSizeEnforcement(t *testing.T) {
-	// MaxMessageSize is 2<<30 (2 GB). We cannot allocate that much in a test,
-	// so we verify that the check exists by confirming WriteFrame uses
-	// MaxMessageSize correctly. We test that a message just over uint32 max
-	// would be rejected via the constant comparison.
-	// Instead, test with a nil writer that would fail if data were written.
-	if MaxMessageSize != 2<<30 {
+	if MaxMessageSize != 64<<20 {
 		t.Fatalf("unexpected MaxMessageSize: %d", MaxMessageSize)
+	}
+}
+
+func TestReadFrameRejectsOversizedLengthBeforeAllocation(t *testing.T) {
+	// A hostile peer can claim a huge frame with four bytes. The reader must
+	// reject it before allocating the payload buffer.
+	header := make([]byte, LengthFieldSize)
+	binary.LittleEndian.PutUint32(header, MaxMessageSize+1)
+
+	_, err := ReadFrame(bytes.NewReader(header))
+	if err != ErrMessageTooLarge {
+		t.Fatalf("expected ErrMessageTooLarge, got %v", err)
+	}
+}
+
+func TestReadFrameWithLimit(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, make([]byte, 100)); err != nil {
+		t.Fatalf("WriteFrame: %v", err)
+	}
+
+	_, err := ReadFrameWithLimit(bytes.NewReader(buf.Bytes()), 50)
+	if err != ErrMessageTooLarge {
+		t.Fatalf("expected ErrMessageTooLarge, got %v", err)
 	}
 }
 

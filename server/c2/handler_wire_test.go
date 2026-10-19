@@ -2,6 +2,7 @@ package c2
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
@@ -75,7 +76,7 @@ func TestWireRoundTrip_RegisterData(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if decoded != original {
+	if !reflect.DeepEqual(decoded, original) {
 		t.Errorf("round-trip mismatch:\n  got  %+v\n  want %+v", decoded, original)
 	}
 }
@@ -93,7 +94,7 @@ func TestWireRoundTrip_RegisterData_ZeroValues(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if decoded != original {
+	if !reflect.DeepEqual(decoded, original) {
 		t.Errorf("round-trip mismatch:\n  got  %+v\n  want %+v", decoded, original)
 	}
 }
@@ -114,7 +115,7 @@ func TestWireRoundTrip_RegisterAckData(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if decoded != original {
+	if !reflect.DeepEqual(decoded, original) {
 		t.Errorf("round-trip mismatch:\n  got  %+v\n  want %+v", decoded, original)
 	}
 }
@@ -134,7 +135,7 @@ func TestWireRoundTrip_CheckinData(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if decoded != original {
+	if !reflect.DeepEqual(decoded, original) {
 		t.Errorf("round-trip mismatch:\n  got  %+v\n  want %+v", decoded, original)
 	}
 }
@@ -204,7 +205,7 @@ func TestWireRoundTrip_TaskWire(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if decoded != original {
+	if !reflect.DeepEqual(decoded, original) {
 		t.Errorf("round-trip mismatch:\n  got  %+v\n  want %+v", decoded, original)
 	}
 }
@@ -228,7 +229,7 @@ func TestWireRoundTrip_ResultData(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if decoded != original {
+	if !reflect.DeepEqual(decoded, original) {
 		t.Errorf("round-trip mismatch:\n  got  %+v\n  want %+v", decoded, original)
 	}
 }
@@ -252,7 +253,7 @@ func TestWireRoundTrip_ResultData_Failure(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if decoded != original {
+	if !reflect.DeepEqual(decoded, original) {
 		t.Errorf("round-trip mismatch:\n  got  %+v\n  want %+v", decoded, original)
 	}
 }
@@ -349,7 +350,7 @@ func TestWireRoundTrip_NestedMessage_RegisterData(t *testing.T) {
 		t.Fatalf("unmarshal register data from message: %v", err)
 	}
 
-	if decodedReg != reg {
+	if !reflect.DeepEqual(decodedReg, reg) {
 		t.Errorf("nested round-trip mismatch:\n  got  %+v\n  want %+v", decodedReg, reg)
 	}
 }
