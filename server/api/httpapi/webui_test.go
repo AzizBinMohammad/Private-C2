@@ -11,6 +11,25 @@ import (
 // TestPortalTaskTypesMatchProtocol guards against the portal drifting from the
 // implant registry. The dropdown previously offered task types no handler
 // implemented and omitted scan.
+func TestPortalHasLootPanel(t *testing.T) {
+	raw, err := webUIFS.ReadFile("webui/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(raw)
+	for _, want := range []string{
+		`data-panel="loot"`,
+		`id="panel-loot"`,
+		`id="loot-table"`,
+		`function refreshLoot()`,
+		`function downloadLoot(`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("portal missing %q", want)
+		}
+	}
+}
+
 func TestPortalTaskTypesMatchProtocol(t *testing.T) {
 	raw, err := webUIFS.ReadFile("webui/index.html")
 	if err != nil {

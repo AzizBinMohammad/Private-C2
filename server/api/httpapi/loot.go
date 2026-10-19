@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/azizbinmohammad/private-c2/pkg/audit"
+	"github.com/azizbinmohammad/private-c2/pkg/redact"
 	"github.com/azizbinmohammad/private-c2/server/api/authz"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"github.com/azizbinmohammad/private-c2/server/store/repository"
@@ -36,7 +38,15 @@ type lootHandler struct {
 	db      *gorm.DB
 	dir     string
 	auditor *audit.Logger
+
+	keyOnce sync.Once
+	key     []byte
+	keyErr  error
 }
+
+// lootMagic prefixes AES-GCM blobs. Files without it are treated as legacy
+// plaintext so previously stored loot remains readable.
+const lootMagic = "PC2LOOT1"
 
 func newLootHandler(db *gorm.DB, auditor *audit.Logger) *lootHandler {
 	dir := os.Getenv("PC2_LOOT_DIR")
@@ -169,8 +179,13 @@ func (lh *lootHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "cannot create loot directory"})
 		return
 	}
+	sealed, err := lh.seal(data)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "cannot encrypt loot"})
+		return
+	}
 	path := filepath.Join(lh.dir, id+".bin")
-	if err := writeFileAtomic(path, data); err != nil {
+	if err := writeFileAtomic(path, sealed); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "cannot store loot"})
 		return
 	}
@@ -245,10 +260,25 @@ func (lh *lootHandler) handleLootDetail(w http.ResponseWriter, r *http.Request) 
 	switch r.Method {
 	case http.MethodGet:
 		if download {
+			plain, err := lh.readArtifact(artifact.Path)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "cannot read loot"})
+				return
+			}
+			if r.URL.Query().Get("redact") == "true" {
+				var ok bool
+				plain, ok = redact.Bytes(plain)
+				if !ok {
+					writeJSON(w, http.StatusUnprocessableEntity,
+						ErrorResponse{Error: "loot is binary and cannot be redacted"})
+					return
+				}
+			}
 			w.Header().Set("Content-Type", "application/octet-stream")
 			w.Header().Set("Content-Disposition",
 				fmt.Sprintf("attachment; filename=%q", safeFilename(artifact.Name)))
-			http.ServeFile(w, r, artifact.Path)
+			w.Header().Set("Content-Length", fmt.Sprint(len(plain)))
+			_, _ = w.Write(plain)
 			return
 		}
 		writeJSON(w, http.StatusOK, artifact)

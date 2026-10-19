@@ -262,6 +262,7 @@ tr.selected td{background:rgba(59,130,246,.1)}
     <div class="tab" data-panel="payloads">Payloads</div>
     <div class="tab" data-panel="operators">Operators</div>
     <div class="tab" data-panel="audit">Audit</div>
+    <div class="tab" data-panel="loot">Loot</div>
     <div class="tab" data-panel="scanner">Scanner</div>
   </div>
 
@@ -512,6 +513,33 @@ tr.selected td{background:rgba(59,130,246,.1)}
         <button class="btn" id="audit-prev" onclick="auditPrev()" disabled>Prev</button>
         <span id="audit-page-info">Page 1</span>
         <button class="btn" id="audit-next" onclick="auditNext()">Next</button>
+      </div>
+    </div>
+
+    <!-- LOOT -->
+    <div class="panel" id="panel-loot">
+      <div class="toolbar">
+        <div class="filters">
+          <select id="loot-kind" onchange="refreshLoot()" style="width:180px">
+            <option value="">All kinds</option>
+            <option value="credential">Credential</option>
+            <option value="file">File</option>
+            <option value="screenshot">Screenshot</option>
+            <option value="ot_finding">OT finding</option>
+            <option value="task">Task output</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="refreshLoot()">Refresh</button>
+          <button class="btn primary" onclick="promoteLoot()">Promote Task Result</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Kind</th><th>Name</th><th>Size</th><th>SHA256</th><th>Engagement</th><th>Operator</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody id="loot-table"><tr><td colspan="9" style="text-align:center;color:var(--fg3);padding:40px">Loading...</td></tr></tbody>
+        </table>
       </div>
     </div>
 
@@ -794,6 +822,7 @@ function switchTab(panel) {
   else if (panel === 'payloads') refreshPayloads();
   else if (panel === 'operators') refreshOperators();
   else if (panel === 'audit') refreshAudit();
+  else if (panel === 'loot') refreshLoot();
   else if (panel === 'scanner') refreshScanner();
   else if (panel === 'ot') loadOTData();
 }
@@ -1564,6 +1593,77 @@ function updateFormatOptions() {
     return '<option value="' + f.value + '">' + esc(f.label) + '</option>';
   }).join('');
 }
+// ══════════════════════════════════════════
+// Loot
+// ══════════════════════════════════════════
+var lootArtifacts = [];
+
+function refreshLoot() {
+  var kind = document.getElementById('loot-kind').value;
+  var query = kind ? ('?kind=' + encodeURIComponent(kind)) : '';
+  apiFetch('/api/loot' + query).then(function(data) {
+    if (Array.isArray(data)) { lootArtifacts = data; renderLoot(); }
+  }).catch(function() { toast('Failed to load loot', 'error'); });
+}
+
+function renderLoot() {
+  var tb = document.getElementById('loot-table');
+  if (lootArtifacts.length === 0) {
+    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--fg3);padding:40px">No loot stored</td></tr>';
+    return;
+  }
+  tb.innerHTML = lootArtifacts.map(function(a) {
+    return '<tr>' +
+      '<td class="mono" title="' + esc(a.id) + '">' + esc(truncId(a.id)) + '</td>' +
+      '<td>' + esc(a.kind) + '</td>' +
+      '<td>' + esc(a.name) + '</td>' +
+      '<td>' + fmtBytes(a.size) + '</td>' +
+      '<td class="mono" title="' + esc(a.sha256) + '">' + esc((a.sha256 || '').substring(0, 12)) + '...</td>' +
+      '<td class="mono">' + esc(truncId(a.engagement_id)) + '</td>' +
+      '<td>' + esc(a.operator || '—') + '</td>' +
+      '<td class="mono" style="font-size:11px">' + fmtTime(a.created_at) + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="downloadLoot(\'' + jsArg(a.id) + '\',false)">Download</button>' +
+        '<button class="btn" style="padding:3px 8px;font-size:11px;margin-right:4px" onclick="downloadLoot(\'' + jsArg(a.id) + '\',true)">Redacted</button>' +
+        '<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteLoot(\'' + jsArg(a.id) + '\')">Delete</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function downloadLoot(id, redact) {
+  var path = '/api/loot/' + encodeURIComponent(id) + '/download' + (redact ? '?redact=true' : '');
+  apiFetchRaw(path).then(function(r) {
+    if (!r.ok) { throw new Error('download failed: ' + r.status); }
+    return r.blob();
+  }).then(function(blob) {
+    var item = lootArtifacts.find(function(x) { return x.id === id; });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = item ? item.name : (id + '.bin');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }).catch(function(e) { toast('Failed to download loot: ' + e.message, 'error'); });
+}
+
+function deleteLoot(id) {
+  if (!confirm('Delete loot ' + id + '?')) return;
+  apiFetch('/api/loot/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(function() { toast('Loot deleted'); refreshLoot(); })
+    .catch(function() { toast('Failed to delete loot', 'error'); });
+}
+
+function promoteLoot() {
+  var taskId = prompt('Task ID to store as loot:');
+  if (!taskId) return;
+  var name = prompt('Name:', 'task-' + taskId) || ('task-' + taskId);
+  apiFetch('/api/loot', { method: 'POST', body: { task_id: taskId, kind: 'task', name: name } })
+    .then(function() { toast('Loot stored'); refreshLoot(); })
+    .catch(function() { toast('Failed to store loot', 'error'); });
+}
+
 function refreshPayloads() {
   apiFetch('/api/payloads').then(function(data) {
     if (Array.isArray(data)) {

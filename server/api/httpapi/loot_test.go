@@ -7,10 +7,27 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 )
+
+func lootBlobs(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blobs []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".bin") {
+			blobs = append(blobs, e.Name())
+		}
+	}
+	return blobs
+}
 
 func lootRequest(t *testing.T, router http.Handler, method, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -62,8 +79,19 @@ func TestLootLifecycle(t *testing.T) {
 	if artifact.ID == "" || artifact.SHA256 == "" || artifact.Size != int64(len(secret)) {
 		t.Fatalf("unexpected artifact: %+v", artifact)
 	}
-	if entries, _ := os.ReadDir(lootDir); len(entries) != 1 {
-		t.Fatalf("loot directory has %d files, want 1", len(entries))
+	if blobs := lootBlobs(t, lootDir); len(blobs) != 1 {
+		t.Fatalf("loot directory has %d blobs, want 1", len(blobs))
+	} else {
+		raw, err := os.ReadFile(filepath.Join(lootDir, blobs[0]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.HasPrefix(raw, []byte(lootMagic)) {
+			t.Fatalf("loot blob is not encrypted")
+		}
+		if bytes.Contains(raw, secret) {
+			t.Fatalf("loot blob contains plaintext")
+		}
 	}
 
 	list := lootRequest(t, router, http.MethodGet, "/api/loot?engagement_id="+engagement.ID, token, nil)
@@ -87,8 +115,8 @@ func TestLootLifecycle(t *testing.T) {
 	if del.Code != http.StatusOK {
 		t.Fatalf("delete = %d %s", del.Code, del.Body.String())
 	}
-	if entries, _ := os.ReadDir(lootDir); len(entries) != 0 {
-		t.Fatalf("loot directory has %d files after delete", len(entries))
+	if blobs := lootBlobs(t, lootDir); len(blobs) != 0 {
+		t.Fatalf("loot directory has %d blobs after delete", len(blobs))
 	}
 	missing := lootRequest(t, router, http.MethodGet, "/api/loot/"+artifact.ID, token, nil)
 	if missing.Code != http.StatusNotFound {
@@ -123,6 +151,59 @@ func TestLootCredentialGate(t *testing.T) {
 	allowed := lootRequest(t, router, http.MethodPost, "/api/loot", token, body)
 	if allowed.Code != http.StatusCreated {
 		t.Fatalf("credential loot with gate = %d %s", allowed.Code, allowed.Body.String())
+	}
+}
+
+func TestLootLegacyPlaintextAndRedaction(t *testing.T) {
+	lootDir := t.TempDir()
+	t.Setenv("PC2_LOOT_DIR", lootDir)
+	router, _, db := setupTestRouter(t)
+	token := getAuthToken(t, router)
+
+	engagement := &models.Engagement{Name: "legacy", Status: "active", AuthorizationRef: "auth-1"}
+	if err := db.Create(engagement).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(lootDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	textPath := filepath.Join(lootDir, "legacy-text.bin")
+	text := []byte("target: plc-1\npassword=hunter2\n")
+	if err := os.WriteFile(textPath, text, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.LootArtifact{
+		Base: models.Base{ID: "legacy-text"}, EngagementID: engagement.ID,
+		Kind: "file", Name: "legacy.txt", Path: textPath,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	raw := lootRequest(t, router, http.MethodGet, "/api/loot/legacy-text/download", token, nil)
+	if raw.Code != http.StatusOK || !bytes.Equal(raw.Body.Bytes(), text) {
+		t.Fatalf("legacy download = %d %q", raw.Code, raw.Body.String())
+	}
+	redacted := lootRequest(t, router, http.MethodGet, "/api/loot/legacy-text/download?redact=true", token, nil)
+	if redacted.Code != http.StatusOK || strings.Contains(redacted.Body.String(), "hunter2") {
+		t.Fatalf("redacted download = %d %q", redacted.Code, redacted.Body.String())
+	}
+	if !strings.Contains(redacted.Body.String(), "target: plc-1") {
+		t.Fatalf("redaction removed non-secret context: %q", redacted.Body.String())
+	}
+
+	binaryPath := filepath.Join(lootDir, "legacy-binary.bin")
+	if err := os.WriteFile(binaryPath, []byte{0x00, 0x01, 0x02}, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.LootArtifact{
+		Base: models.Base{ID: "legacy-binary"}, EngagementID: engagement.ID,
+		Kind: "file", Name: "payload.bin", Path: binaryPath,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if w := lootRequest(t, router, http.MethodGet, "/api/loot/legacy-binary/download?redact=true", token, nil); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("binary redaction = %d %s", w.Code, w.Body.String())
 	}
 }
 
