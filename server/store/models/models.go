@@ -25,6 +25,7 @@ type Operator struct {
 	Base
 	Name         string       `gorm:"uniqueIndex;not null" json:"name"`
 	Role         string       `gorm:"not null;default:'operator'" json:"role"`
+	PasswordHash []byte       `json:"-"`
 	CertPEM      []byte       `json:"-"`
 	MFAEnabled   bool         `gorm:"default:false" json:"mfa_enabled"`
 	MFASecret    string       `json:"-"`
@@ -161,6 +162,9 @@ type Engagement struct {
 	Description          string     `json:"description"`
 	AuthorizationRef     string     `json:"authorization_ref"`
 	Status               string     `gorm:"default:'planning'" json:"status"`
+	KillSwitchActive     bool       `gorm:"default:false" json:"kill_switch_active"`
+	KilledAt             *time.Time `json:"killed_at,omitempty"`
+	KillReason           string     `json:"kill_reason,omitempty"`
 	ScopeConfig          string     `gorm:"type:text" json:"scope_config"` // JSON
 	TimeWindowStart      *time.Time `json:"time_window_start,omitempty"`
 	TimeWindowEnd        *time.Time `json:"time_window_end,omitempty"`

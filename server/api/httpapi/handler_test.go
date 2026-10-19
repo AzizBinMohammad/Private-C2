@@ -31,8 +31,10 @@ func init() {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.MinCost)
 	newAuthManagerFn = func() *AuthManager {
 		return &AuthManager{
-			users:  map[string][]byte{"admin": hash},
-			tokens: make(map[string]*tokenEntry),
+			users:       map[string][]byte{"admin": hash},
+			roles:       map[string]string{"admin": "admin"},
+			operatorIDs: make(map[string]string),
+			tokens:      make(map[string]*tokenEntry),
 		}
 	}
 }
@@ -1680,10 +1682,13 @@ func TestHTTP_KillswitchEngagement_Success(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var result map[string]string
+	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
 	if result["status"] != "killed" {
-		t.Errorf("status = %q, want %q", result["status"], "killed")
+		t.Errorf("status = %v, want %q", result["status"], "killed")
+	}
+	if _, ok := result["sessions_closed"]; !ok {
+		t.Error("killswitch response is missing sessions_closed")
 	}
 
 	// Verify the DB was updated.

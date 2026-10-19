@@ -27,6 +27,7 @@ import (
 	"github.com/azizbinmohammad/private-c2/pkg/engagement"
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
+	"github.com/azizbinmohammad/private-c2/pkg/taskargs"
 	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
 )
 
@@ -391,30 +392,7 @@ func splitList(raw string) []string {
 
 // taskTarget extracts the network target a task will act on, when it has one.
 func taskTarget(t protocol.TaskWire) string {
-	switch t.Type {
-	case protocol.TaskPortscan:
-		target, _, err := parsePortscanArgs(t.Args)
-		if err == nil {
-			return target
-		}
-	case protocol.TaskResolve:
-		return strings.TrimSpace(t.Args)
-	case protocol.TaskScan:
-		var req struct {
-			Target string `json:"target"`
-		}
-		if err := json.Unmarshal([]byte(t.Args), &req); err == nil {
-			return strings.TrimSpace(req.Target)
-		}
-	case protocol.TaskNmap:
-		fields := strings.Fields(t.Args)
-		for i := len(fields) - 1; i >= 0; i-- {
-			if !strings.HasPrefix(fields[i], "-") {
-				return fields[i]
-			}
-		}
-	}
-	return ""
+	return taskargs.Target(t.Type, t.Args)
 }
 
 func checkTaskSafety(ctx context.Context, t protocol.TaskWire) error {

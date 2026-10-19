@@ -83,6 +83,8 @@ type ImplantServer struct {
 	// never be able to overwrite another implant's result.
 	taskOwners map[string]string
 	listeners  map[string]*runningListener
+	// killed maps an engagement ID to the reason its kill switch fired.
+	killed map[string]string
 
 	// persist is optional. When set, session/task lifecycle is written through
 	// to durable storage.
@@ -109,6 +111,7 @@ func NewImplantServer() *ImplantServer {
 		taskResults: make(map[string]*TaskResult),
 		taskOwners:  make(map[string]string),
 		listeners:   make(map[string]*runningListener),
+		killed:      make(map[string]string),
 		lastPersist: make(map[string]time.Time),
 	}
 }
@@ -322,6 +325,15 @@ func (s *ImplantServer) handleCheckin(conn net.Conn, sessionID string, data json
 		}
 	}
 
+	if reason, killed := s.killed[sess.EngagementID]; killed && sess.EngagementID != "" {
+		s.mu.Unlock()
+		tasking := protocol.TaskingData{Kill: true, KillReason: reason}
+		if err := s.sendMessage(conn, "tasking", tasking); err != nil {
+			log.Printf("[c2] session %s: failed to send kill tasking: %v", sessionID, err)
+		}
+		return
+	}
+
 	persistCheckin := false
 	if s.persist != nil && now.Sub(s.lastPersist[sessionID]) >= persistInterval {
 		s.lastPersist[sessionID] = now
@@ -506,6 +518,57 @@ var ErrUnsupportedTaskType = errors.New("unsupported task type")
 // of pending tasks.
 var ErrTaskQueueFull = errors.New("task queue full")
 
+// ErrEngagementKilled is returned when tasking is attempted for an engagement
+// whose kill switch is active.
+var ErrEngagementKilled = errors.New("engagement kill switch is active")
+
+// KillEngagement activates the in-memory kill switch, closes every live
+// session in the engagement, and reaps its queues/results. It returns the
+// number of sessions closed.
+func (s *ImplantServer) KillEngagement(engagementID, reason string) int {
+	if engagementID == "" {
+		return 0
+	}
+
+	s.mu.Lock()
+	s.killed[engagementID] = reason
+	var conns []net.Conn
+	var closedIDs []string
+	for id, sess := range s.sessions {
+		if sess.EngagementID != engagementID {
+			continue
+		}
+		closedIDs = append(closedIDs, id)
+		if sess.conn != nil {
+			conns = append(conns, sess.conn)
+		}
+		s.removeSessionLocked(id)
+	}
+	s.mu.Unlock()
+
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+	for _, id := range closedIDs {
+		s.persistSessionDisconnected(id)
+	}
+	if len(closedIDs) > 0 {
+		log.Printf("[c2] kill switch for engagement %s closed %d session(s): %s", engagementID, len(closedIDs), reason)
+	}
+	return len(closedIDs)
+}
+
+// IsEngagementKilled reports whether the kill switch for an engagement fired.
+func (s *ImplantServer) IsEngagementKilled(engagementID string) (bool, string) {
+	if engagementID == "" {
+		return false, ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	reason, ok := s.killed[engagementID]
+	return ok, reason
+}
+
 // CloseSession terminates a live implant session and releases its resources.
 //
 // Closing the underlying connection is what ends the session: the implant's
@@ -576,6 +639,10 @@ func (s *ImplantServer) QueueTask(sessionID, taskType, args string) (string, err
 	if len(s.taskQueues[sessionID]) >= maxQueueDepth {
 		s.mu.Unlock()
 		return "", fmt.Errorf("%w for session %s", ErrTaskQueueFull, sessionID)
+	}
+	if reason, killed := s.killed[sess.EngagementID]; killed && sess.EngagementID != "" {
+		s.mu.Unlock()
+		return "", fmt.Errorf("%w: %s", ErrEngagementKilled, reason)
 	}
 
 	task := &Task{

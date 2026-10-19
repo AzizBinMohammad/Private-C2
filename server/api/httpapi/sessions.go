@@ -100,6 +100,16 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "task type is required"})
 			return
 		}
+		sess := sh.implantServer.GetSession(sessionID)
+		if sess == nil {
+			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "session not found"})
+			return
+		}
+		if err := sh.authorizeTask(sess, req.Type, req.Args); err != nil {
+			writeJSON(w, http.StatusForbidden, ErrorResponse{Error: err.Error()})
+			return
+		}
+
 		taskID, err := sh.implantServer.QueueTask(sessionID, req.Type, req.Args)
 		if err != nil {
 			status := http.StatusInternalServerError
@@ -108,6 +118,8 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 				status = http.StatusNotFound
 			case errors.Is(err, c2.ErrUnsupportedTaskType), errors.Is(err, c2.ErrTaskQueueFull):
 				status = http.StatusBadRequest
+			case errors.Is(err, c2.ErrEngagementKilled):
+				status = http.StatusForbidden
 			}
 			writeJSON(w, status, ErrorResponse{Error: err.Error()})
 			return

@@ -5,8 +5,10 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"log"
 	"net/http"
 
+	"github.com/azizbinmohammad/private-c2/server/api/authz"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"gorm.io/gorm"
 )
@@ -38,6 +40,11 @@ var newAuthManagerFn = NewAuthManager
 // to disable listener creation.
 func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *tls.Config) http.Handler {
 	auth := newAuthManagerFn()
+	if err := auth.LoadFromDB(db); err != nil {
+		// The in-memory admin remains usable; operators created earlier are
+		// missing until the database is reachable again.
+		log.Printf("[api] failed to load operators: %v", err)
+	}
 
 	mux := http.NewServeMux()
 
@@ -55,6 +62,7 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 
 	// ── Protected API routes ──
 	api := http.NewServeMux()
+	api.HandleFunc("/api/auth/logout", auth.LogoutHandler())
 
 	// ───────────────── Sessions ─────────────────
 
@@ -79,7 +87,7 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 
 	// ───────────────── Engagements ─────────────────
 
-	eh := &engagementHandler{db: db}
+	eh := &engagementHandler{db: db, implantServer: implantServer}
 	api.HandleFunc("/api/engagements", eh.handleEngagements)
 	api.HandleFunc("/api/engagements/", eh.handleEngagementDetail)
 
@@ -116,23 +124,25 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 	api.HandleFunc("/api/ot/topology", oth.handleOTTopology)
 	api.HandleFunc("/api/ot/reports", oth.handleOTReports)
 
-	// ── Wire protected routes through auth middleware ──
-	mux.Handle("/api/sessions", auth.Middleware(api))
-	mux.Handle("/api/sessions/", auth.Middleware(api))
-	mux.Handle("/api/tasks/", auth.Middleware(api))
-	mux.Handle("/api/beacons", auth.Middleware(api))
-	mux.Handle("/api/listeners", auth.Middleware(api))
-	mux.Handle("/api/listeners/", auth.Middleware(api))
-	mux.Handle("/api/engagements", auth.Middleware(api))
-	mux.Handle("/api/engagements/", auth.Middleware(api))
-	mux.Handle("/api/payloads", auth.Middleware(api))
-	mux.Handle("/api/payloads/", auth.Middleware(api))
-	mux.Handle("/api/operators", auth.Middleware(api))
-	mux.Handle("/api/operators/", auth.Middleware(api))
-	mux.Handle("/api/server/", auth.Middleware(api))
-	mux.Handle("/api/audit", auth.Middleware(api))
-	mux.Handle("/api/audit/", auth.Middleware(api))
-	mux.Handle("/api/ot/", auth.Middleware(api))
+	// ── Wire protected routes through authentication + authorization ──
+	protected := auth.Middleware(authz.Middleware(api))
+	mux.Handle("/api/sessions", protected)
+	mux.Handle("/api/sessions/", protected)
+	mux.Handle("/api/tasks/", protected)
+	mux.Handle("/api/beacons", protected)
+	mux.Handle("/api/listeners", protected)
+	mux.Handle("/api/listeners/", protected)
+	mux.Handle("/api/engagements", protected)
+	mux.Handle("/api/engagements/", protected)
+	mux.Handle("/api/payloads", protected)
+	mux.Handle("/api/payloads/", protected)
+	mux.Handle("/api/operators", protected)
+	mux.Handle("/api/operators/", protected)
+	mux.Handle("/api/server/", protected)
+	mux.Handle("/api/audit", protected)
+	mux.Handle("/api/audit/", protected)
+	mux.Handle("/api/ot/", protected)
+	mux.Handle("/api/auth/logout", protected)
 
 	return mux
 }

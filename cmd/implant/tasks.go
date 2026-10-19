@@ -17,6 +17,7 @@ import (
 	"github.com/azizbinmohammad/private-c2/implant/modules/process"
 	"github.com/azizbinmohammad/private-c2/implant/modules/screenshot"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
+	"github.com/azizbinmohammad/private-c2/pkg/taskargs"
 )
 
 // taskHandler executes one task type. Args are the operator-supplied string
@@ -263,38 +264,14 @@ func handleNetstat(ctx context.Context, _ string) (string, error) {
 	return string(out), err
 }
 
-// parsePortscanArgs accepts "target" or "target:22,80,443".
+// parsePortscanArgs is kept as a thin wrapper so tests and callers share the
+// parser implementation in pkg/taskargs.
 func parsePortscanArgs(args string) (string, []int, error) {
-	args = strings.TrimSpace(args)
-	if args == "" {
-		return "", nil, fmt.Errorf("portscan requires a target")
-	}
-	target := args
-	var ports []int
-	if i := strings.LastIndex(args, ":"); i > 0 && i < len(args)-1 {
-		suffix := args[i+1:]
-		if portList, err := parsePorts(suffix); err == nil {
-			target = args[:i]
-			ports = portList
-		}
-	}
-	if target == "" {
-		return "", nil, fmt.Errorf("portscan target is empty")
-	}
-	return target, ports, nil
+	return taskargs.ParsePortscan(args)
 }
 
 func parsePorts(s string) ([]int, error) {
-	fields := strings.Split(s, ",")
-	ports := make([]int, 0, len(fields))
-	for _, f := range fields {
-		p, err := strconv.Atoi(strings.TrimSpace(f))
-		if err != nil || p < 1 || p > 65535 {
-			return nil, fmt.Errorf("invalid port %q", f)
-		}
-		ports = append(ports, p)
-	}
-	return ports, nil
+	return taskargs.ParsePorts(s)
 }
 
 func handlePortscan(ctx context.Context, args string) (string, error) {
