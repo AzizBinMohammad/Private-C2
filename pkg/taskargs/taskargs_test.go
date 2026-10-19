@@ -43,6 +43,8 @@ func TestTarget(t *testing.T) {
 		{protocol.TaskScan, `{"target":"10.0.0.9"}`, "10.0.0.9"},
 		{protocol.TaskNmap, "-sV 10.0.0.7", "10.0.0.7"},
 		{protocol.TaskLateralSSH, `{"target":"10.0.0.11","user":"u","command":"id"}`, "10.0.0.11"},
+		{protocol.TaskLateralWinRM, `{"target":"10.0.0.13","username":"u","password":"p","command":"id"}`, "10.0.0.13"},
+		{protocol.TaskLateralWMI, `{"target":"10.0.0.14","username":"u","password":"p","command":"id"}`, "10.0.0.14"},
 		{protocol.TaskPivotPortfwd, `{"action":"start","listen":"127.0.0.1:9000","target":"10.0.0.12:445"}`, "10.0.0.12:445"},
 		{protocol.TaskShell, "whoami", ""},
 	}

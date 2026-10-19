@@ -24,20 +24,29 @@ const (
 	TaskOTPLCRead     = "ot_plc_read"
 	TaskOTCredentials = "ot_credentials"
 
-	TaskCredentialEnum = "credential_enum"
-	TaskCredentialRead = "credential_read"
-	TaskCredentialDump = "credential_dump"
+	TaskCredentialEnum     = "credential_enum"
+	TaskCredentialRead     = "credential_read"
+	TaskCredentialDump     = "credential_dump"
+	TaskCredentialDPAPI    = "credential_dpapi"
+	TaskCredentialKerberos = "credential_kerberos"
 
-	TaskLateralSSH   = "lateral_ssh"
-	TaskPivotSocks   = "pivot_socks"
-	TaskPivotPortfwd = "pivot_portfwd"
+	TaskLateralSSH     = "lateral_ssh"
+	TaskLateralWinRM   = "lateral_winrm"
+	TaskLateralWMI     = "lateral_wmi"
+	TaskPivotSocks     = "pivot_socks"
+	TaskPivotPortfwd   = "pivot_portfwd"
+	TaskPivotNamedpipe = "pivot_namedpipe"
 
 	TaskPowerShell      = "powershell"
 	TaskPython          = "python"
 	TaskExecuteAssembly = "execute_assembly"
+	TaskInlineExecute   = "inline_execute"
 
 	TaskEvasionTimestomp = "evasion_timestomp"
 	TaskEvasionCleanup   = "evasion_cleanup"
+	TaskEvasionAMSI      = "evasion_amsi"
+	TaskEvasionETW       = "evasion_etw"
+	TaskEvasionPPIDSpoof = "evasion_ppid_spoof"
 
 	TaskPersistShell    = "persist_shell"
 	TaskPersistSystemd  = "persist_systemd"
@@ -97,14 +106,23 @@ var implementedTaskTypes = []string{
 	TaskCredentialEnum,
 	TaskCredentialRead,
 	TaskCredentialDump,
+	TaskCredentialDPAPI,
+	TaskCredentialKerberos,
 	TaskLateralSSH,
+	TaskLateralWinRM,
+	TaskLateralWMI,
 	TaskPivotSocks,
 	TaskPivotPortfwd,
+	TaskPivotNamedpipe,
 	TaskPowerShell,
 	TaskPython,
 	TaskExecuteAssembly,
+	TaskInlineExecute,
 	TaskEvasionTimestomp,
 	TaskEvasionCleanup,
+	TaskEvasionAMSI,
+	TaskEvasionETW,
+	TaskEvasionPPIDSpoof,
 	TaskPersistShell,
 	TaskPersistSystemd,
 	TaskPersistCron,
@@ -174,6 +192,7 @@ const (
 	CategoryPersistence TaskCategory = "persistence"
 	CategoryEvasion     TaskCategory = "evasion"
 	CategoryOT          TaskCategory = "ot"
+	CategoryExecution   TaskCategory = "execution"
 )
 
 // CategoryFor maps a task type to the engagement capability it requires.
@@ -191,6 +210,8 @@ func CategoryFor(taskType string) TaskCategory {
 		return CategoryLateral
 	case strings.HasPrefix(taskType, "persist_"):
 		return CategoryPersistence
+	case taskType == TaskInlineExecute:
+		return CategoryExecution
 	case strings.HasPrefix(taskType, "evasion_"), strings.HasPrefix(taskType, "syscall_"):
 		return CategoryEvasion
 	case taskType == TaskProcessSuspend, taskType == TaskProcessResume,

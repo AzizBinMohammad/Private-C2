@@ -30,6 +30,7 @@ const (
 	EventEngagementCreate EventType = "engagement.create"
 	EventOTImport         EventType = "ot.import"
 	EventOTReport         EventType = "ot.report"
+	EventPluginRun        EventType = "plugin.run"
 )
 
 type Entry struct {

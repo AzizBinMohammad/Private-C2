@@ -88,6 +88,8 @@ func capabilityAllowed(eng models.Engagement, category protocol.TaskCategory) bo
 		return eng.AllowEvasion
 	case protocol.CategoryOT:
 		return eng.AllowOTAssessment
+	case protocol.CategoryExecution:
+		return eng.AllowCodeExecution
 	default:
 		return false
 	}

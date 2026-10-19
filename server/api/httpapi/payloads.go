@@ -278,6 +278,7 @@ func buildImplant(db *gorm.DB, base models.PayloadArtifact, goos, goarch string)
 		AllowPersistence:         engagement.AllowPersistence,
 		AllowEvasion:             engagement.AllowEvasion,
 		AllowOTAssessment:        engagement.AllowOTAssessment,
+		AllowCodeExecution:       engagement.AllowCodeExecution,
 
 		CACertPEM:     caPEM,
 		ClientCertPEM: certPEM,

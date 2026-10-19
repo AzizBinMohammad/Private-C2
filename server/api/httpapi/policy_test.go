@@ -74,10 +74,14 @@ func TestAuthorizeTask_CapabilityGates(t *testing.T) {
 	if err := sh.authorizeTask(sess, "credential_dump", ""); !errors.Is(err, errPolicyDenied) {
 		t.Fatalf("credential_dump without gate = %v, want denial", err)
 	}
+	if err := sh.authorizeTask(sess, protocol.TaskInlineExecute, ""); !errors.Is(err, errPolicyDenied) {
+		t.Fatalf("inline_execute without gate = %v, want denial", err)
+	}
 
 	if err := db.Model(eng).Updates(map[string]any{
 		"allow_ot_assessment":     true,
 		"allow_credential_access": true,
+		"allow_code_execution":    true,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +90,9 @@ func TestAuthorizeTask_CapabilityGates(t *testing.T) {
 	}
 	if err := sh.authorizeTask(sess, protocol.TaskOTCredentials, "10.0.0.5"); err != nil {
 		t.Fatalf("ot_credentials with gate denied: %v", err)
+	}
+	if err := sh.authorizeTask(sess, protocol.TaskInlineExecute, ""); err != nil {
+		t.Fatalf("inline_execute with gate denied: %v", err)
 	}
 }
 

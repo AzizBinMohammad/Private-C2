@@ -3072,7 +3072,8 @@ func TestHTTP_OT_Reports_MethodNotAllowed(t *testing.T) {
 	router, _, _ := setupTestRouter(t)
 	token := getAuthToken(t, router)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/ot/reports", nil)
+	// POST now generates a report; an unsupported method still returns 405.
+	req := httptest.NewRequest(http.MethodPut, "/api/ot/reports", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)

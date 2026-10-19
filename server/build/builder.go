@@ -34,6 +34,7 @@ type BuildRequest struct {
 	AllowPersistence         bool `json:"allow_persistence"`
 	AllowEvasion             bool `json:"allow_evasion"`
 	AllowOTAssessment        bool `json:"allow_ot_assessment"`
+	AllowCodeExecution       bool `json:"allow_code_execution"`
 
 	CACertPEM     []byte `json:"-"`
 	ClientCertPEM []byte `json:"-"`
@@ -162,6 +163,7 @@ func configFromRequest(req BuildRequest) (protocol.ImplantConfig, string, error)
 		AllowPersistence:         req.AllowPersistence,
 		AllowEvasion:             req.AllowEvasion,
 		AllowOTAssessment:        req.AllowOTAssessment,
+		AllowCodeExecution:       req.AllowCodeExecution,
 		ScopeCIDRs:               req.ScopeCIDRs,
 		ScopeHosts:               req.ScopeHosts,
 		ScopeDomains:             req.ScopeDomains,

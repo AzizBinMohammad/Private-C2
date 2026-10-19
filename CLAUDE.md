@@ -95,14 +95,16 @@ Private-C2/
                            #   system info collection (platform-specific: darwin,
                            #   linux, windows, default)
     modules/
-      credential/          # Credential-source enumeration, secret reads, and
-                           #   Windows LSASS/registry dumps (gated)
+      bof/                 # AMD64 COFF parser/relocator and Windows BOF
+                           #   execution with a Beacon API subset
+      credential/          # Credential enumeration, secret reads, LSASS/
+                           #   registry dumps, DPAPI decrypt (gated)
       filesystem/          # File operations module
-      lateral/             # SSH lateral movement adapter (gated)
+      lateral/             # SSH, WinRM, and WMI lateral adapters (gated)
       persist/             # Shell/systemd/cron and Windows registry/schtasks
                            #   persistence with deterministic artifact IDs
-      pivot/               # SOCKS5 proxy and TCP port forward with
-                           #   per-connection scope checks
+      pivot/               # SOCKS5, TCP port-forward, and Windows named-pipe
+                           #   pivots with per-connection scope checks
       logs/                # Log collection (platform-specific + timestomping)
       network/             # Network recon module
       nmap/                # nmap on the target. nmap.go: availability check
@@ -139,6 +141,8 @@ Private-C2/
       pivot/               # Peer-to-peer pivot transport
     evasion/
       stealth/             # Anti-forensics: trace cleanup
+      patch/               # AMSI/ETW in-memory patches (Windows, gated)
+      spawn/               # Parent-PID-spoofed process creation (Windows)
       syscalls/            # Direct syscall invocation (Windows-specific)
 
   pkg/                     # Shared library modules
@@ -362,11 +366,13 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
   cut, what was verified, and what remains (HTTPS carrier, embedded payload
   builder, audit writer/export, SSE, config wiring, migration ledger).
 - `docs/phase2-status-2026-10-19.md` records the Phase 2 cut: engagement
-  capability gates, OT task execution, identity/chunked-transfer tasks,
-  process/token operations, credential access, SSH lateral movement,
-  SOCKS5/port-forward pivots, scripting, timestomping, persistence, and the
-  loot store. It also lists what is deliberately not delivered (BOF/COFF,
-  in-process CLR, Windows memory evasion, SMB/WinRM/WMI) and that Windows
+  capability gates (including code execution), OT task execution and finding
+  persistence/reporting, process/token operations, credential access (including
+  LSASS/DPAPI/Kerberos), SSH/WinRM/WMI lateral movement, SOCKS5/port-forward/
+  named-pipe pivots, PowerShell/Python/.NET/BOF execution, AMSI/ETW/PPID
+  evasion, persistence, encrypted loot with redaction, and signed plugin
+  manifests. It also lists what remains (in-process CLR, SMB/PsExec, reverse
+  forwarding, sleep obfuscation, browser SQLite decryption) and that Windows
   paths are cross-compiled but not run on a Windows lab host here.
 - `docs/prompt-template.md` is the template for requesting new features, and lists the project facts worth stating up front (notably: which packages are live vs. unreachable).
 

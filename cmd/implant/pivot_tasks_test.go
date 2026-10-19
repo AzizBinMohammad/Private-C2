@@ -82,3 +82,36 @@ func TestLateralSSHHandlerValidation(t *testing.T) {
 		t.Error("invalid lateral_ssh JSON unexpectedly succeeded")
 	}
 }
+
+func TestWinRMAndWMIRequireWindows(t *testing.T) {
+	valid := `{"target":"h","username":"u","password":"p","command":"id"}`
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if _, err := handleLateralWinRM(context.Background(), valid); err == nil {
+		t.Error("lateral_winrm unexpectedly succeeded on this platform")
+	}
+	if _, err := handleLateralWMI(context.Background(), valid); err == nil {
+		t.Error("lateral_wmi unexpectedly succeeded on this platform")
+	}
+}
+
+func TestNamedPipeHandlerValidation(t *testing.T) {
+	for _, args := range []string{
+		`not-json`,
+		`{"action":"start"}`,
+		`{"action":"start","pipe":"pc2"}`,
+		`{"action":"stop"}`,
+		`{"action":"bogus"}`,
+	} {
+		if _, err := handlePivotNamedpipe(context.Background(), args); err == nil {
+			t.Errorf("handlePivotNamedpipe(%q) unexpectedly succeeded", args)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		if _, err := handlePivotNamedpipe(context.Background(),
+			`{"action":"start","pipe":"pc2","target":"127.0.0.1:445"}`); err == nil {
+			t.Error("named-pipe start unexpectedly succeeded on this platform")
+		}
+	}
+}

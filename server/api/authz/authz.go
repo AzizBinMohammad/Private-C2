@@ -47,6 +47,8 @@ const (
 	PermOTWrite          = "ot.write"
 	PermLootRead         = "loot.read"
 	PermLootWrite        = "loot.write"
+	PermPluginRead       = "plugin.read"
+	PermPluginRun        = "plugin.run"
 )
 
 var rolePermissions = map[string]map[string]bool{
@@ -67,6 +69,8 @@ var rolePermissions = map[string]map[string]bool{
 		PermOTWrite:        true,
 		PermLootRead:       true,
 		PermLootWrite:      true,
+		PermPluginRead:     true,
+		PermPluginRun:      true,
 	},
 	"builder": {
 		PermAuthenticated: true,
@@ -86,6 +90,7 @@ var rolePermissions = map[string]map[string]bool{
 		PermServerRead:     true,
 		PermOTRead:         true,
 		PermLootRead:       true,
+		PermPluginRead:     true,
 	},
 	"ot-operator": {
 		PermAuthenticated: true,
@@ -95,6 +100,7 @@ var rolePermissions = map[string]map[string]bool{
 		PermTaskRead:      true,
 		PermServerRead:    true,
 		PermLootRead:      true,
+		PermPluginRead:    true,
 	},
 }
 
@@ -140,6 +146,10 @@ func PermissionFor(method, path string) (string, bool) {
 			return PermOTRead, true
 		}
 		return PermOTWrite, true
+	case path == "/api/plugins":
+		return PermPluginRead, true
+	case strings.HasPrefix(path, "/api/plugins/"):
+		return PermPluginRun, true
 	case path == "/api/loot" || strings.HasPrefix(path, "/api/loot/"):
 		if method == http.MethodGet {
 			return PermLootRead, true

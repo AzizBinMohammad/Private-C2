@@ -495,3 +495,68 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
 * **What would conflict with it**: A real in-process CLR host must preserve the
   same capability gate and must not be presented as equivalent in-memory
   execution.
+
+## In-Memory Code Execution Is a Separate Capability (2026-10-19)
+
+* **Decision**: `inline_execute` maps to a new `execution` category and
+  requires `Engagement.AllowCodeExecution`, the implant's
+  `--allow-code-execution` flag, and the embedded payload flag. Shell,
+  PowerShell, and Python remain general execution primitives.
+* **Why**: A COFF loader accepts arbitrary compiled code and cannot be
+  meaningfully constrained by the shell command allowlist. Making it a distinct
+  gate keeps it off unless an engagement explicitly authorizes in-memory code
+  execution while leaving routine tasking unchanged.
+* **What would conflict with it**: Treating BOF execution as equivalent to
+  shell would let it bypass the capability model. The loader must keep using
+  the same server policy and implant safety checks.
+
+## BOF Loader: AMD64 COFF, Beacon API Subset (2026-10-19)
+
+* **Decision**: `implant/modules/bof` parses AMD64 COFF objects, lays sections
+  out in one image, applies ADDR64/ADDR32/ADDR32NB/REL32 relocations, and runs
+  the `go` entry point in `VirtualAlloc` memory on Windows. Beacon API imports
+  are implemented with `syscall.NewCallback` for output, data parsing, format
+  buffers, admin checks, and token revert.
+* **Why**: This covers common reconnaissance BOFs without CGO and keeps parsing
+  and relocation math unit-testable on Linux.
+* **What would conflict with it**: `BeaconPrintf` is varargs and is not
+  implemented; BOFs importing it fail with an unresolved symbol. i386 COFF and
+  deep-stack BOFs are unsupported until verified on a Windows lab host.
+
+## Plugins Are Manifests, Not Native Code (2026-10-19)
+
+* **Decision**: A plugin is a JSON manifest under `PC2_PLUGIN_DIR` that maps a
+  command name to a registered task type and a Go text/template for arguments.
+  Optional Ed25519 signatures are verified over the canonical manifest;
+  `PC2_PLUGIN_REQUIRE_SIGNED=true` makes signatures mandatory.
+* **Why**: This gives operators reusable, reviewable command definitions
+  without loading untrusted native code into the server, and the template
+  renders arguments that still pass through `authorizeTask`.
+* **What would conflict with it**: In-server scripting or native plugins would
+  bypass the policy path; any future extension must call `submitTask`
+  (or an equivalent policy-checked queue) rather than `QueueTask` directly.
+
+## Loot Encryption and Redaction (2026-10-19)
+
+* **Decision**: Loot blobs are AES-256-GCM encrypted. The key comes from
+  `PC2_LOOT_KEY`, a `0600` `loot.key` file in the loot directory, or is
+  generated on first use. Downloads decrypt transparently; `?redact=true`
+  applies `pkg/redact` to text blobs and refuses binary ones.
+* **Why**: Credentials and captured files are the highest-value data in the
+  system. Encryption at rest protects backups and accidental copies; redaction
+  makes it possible to share a deliverable without leaking secrets.
+* **What would conflict with it**: Serving loot from a static file server
+  bypasses decryption, RBAC, and the credential gate. Rotating the key requires
+  re-encrypting existing blobs or retaining the old key.
+
+## OT Findings Are Imported Through a Gated Endpoint (2026-10-19)
+
+* **Decision**: `POST /api/ot/import` maps an OT task result (or inline items)
+  into the existing OT finding tables, and `POST /api/ot/reports` renders and
+  stores Markdown/JSON assessments. Imports require
+  `Engagement.AllowOTAssessment`.
+* **Why**: OT task output was previously only visible as a task result, which
+  made cross-host assets, topology, compliance, and reporting impossible.
+  Reusing the existing models keeps the schema stable.
+* **What would conflict with it**: Imports without the OT gate, or schema
+  changes that make task output incompatible with the mapping structs.

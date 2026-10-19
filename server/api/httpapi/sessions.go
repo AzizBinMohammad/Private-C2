@@ -104,42 +104,7 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "task type is required"})
 			return
 		}
-		sess := sh.implantServer.GetSession(sessionID)
-		if sess == nil {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "session not found"})
-			return
-		}
-		if err := sh.authorizeTask(sess, req.Type, req.Args); err != nil {
-			writeJSON(w, http.StatusForbidden, ErrorResponse{Error: err.Error()})
-			return
-		}
-
-		taskID, err := sh.implantServer.QueueTask(sessionID, req.Type, req.Args)
-		if err != nil {
-			status := http.StatusInternalServerError
-			switch {
-			case errors.Is(err, c2.ErrSessionNotFound):
-				status = http.StatusNotFound
-			case errors.Is(err, c2.ErrUnsupportedTaskType), errors.Is(err, c2.ErrTaskQueueFull):
-				status = http.StatusBadRequest
-			case errors.Is(err, c2.ErrEngagementKilled):
-				status = http.StatusForbidden
-			}
-			writeJSON(w, status, ErrorResponse{Error: err.Error()})
-			return
-		}
-		if sh.auditor != nil {
-			identity, _ := authz.FromContext(r.Context())
-			operator := identity.OperatorID
-			if operator == "" {
-				operator = identity.Username
-			}
-			_ = sh.auditor.Log(operator, sess.EngagementID, sessionID,
-				audit.EventSessionInteract, "task."+req.Type,
-				taskargs.Target(req.Type, req.Args), "queued",
-				map[string]any{"task_id": taskID}, r.RemoteAddr, "")
-		}
-		writeJSON(w, http.StatusCreated, TaskResponse{TaskID: taskID})
+		sh.submitTask(w, r, sessionID, req.Type, req.Args)
 
 	case "tasks":
 		sh.handleSessionTasks(w, r, sessionID)
@@ -256,6 +221,47 @@ func (sh *sessionHandler) handleSessionHistory(w http.ResponseWriter, r *http.Re
 		rows = rows[:limit]
 	}
 	writeJSON(w, http.StatusOK, rows)
+}
+
+// submitTask applies engagement policy, queues a task, and writes the API
+// response. It is shared by direct session tasking and plugin execution.
+func (sh *sessionHandler) submitTask(w http.ResponseWriter, r *http.Request, sessionID, taskType, args string) {
+	sess := sh.implantServer.GetSession(sessionID)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "session not found"})
+		return
+	}
+	if err := sh.authorizeTask(sess, taskType, args); err != nil {
+		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	taskID, err := sh.implantServer.QueueTask(sessionID, taskType, args)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, c2.ErrSessionNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, c2.ErrUnsupportedTaskType), errors.Is(err, c2.ErrTaskQueueFull):
+			status = http.StatusBadRequest
+		case errors.Is(err, c2.ErrEngagementKilled):
+			status = http.StatusForbidden
+		}
+		writeJSON(w, status, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if sh.auditor != nil {
+		identity, _ := authz.FromContext(r.Context())
+		operator := identity.OperatorID
+		if operator == "" {
+			operator = identity.Username
+		}
+		_ = sh.auditor.Log(operator, sess.EngagementID, sessionID,
+			audit.EventSessionInteract, "task."+taskType,
+			taskargs.Target(taskType, args), "queued",
+			map[string]any{"task_id": taskID}, r.RemoteAddr, "")
+	}
+	writeJSON(w, http.StatusCreated, TaskResponse{TaskID: taskID})
 }
 
 func (sh *sessionHandler) handleSessionTasks(w http.ResponseWriter, r *http.Request, sessionID string) {

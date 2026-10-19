@@ -63,7 +63,8 @@ func Target(taskType, args string) string {
 		if err := json.Unmarshal([]byte(args), &req); err == nil {
 			return strings.TrimSpace(req.Target)
 		}
-	case protocol.TaskLateralSSH, protocol.TaskPivotPortfwd:
+	case protocol.TaskLateralSSH, protocol.TaskLateralWinRM, protocol.TaskLateralWMI,
+		protocol.TaskPivotPortfwd:
 		var req struct {
 			Target string `json:"target"`
 		}

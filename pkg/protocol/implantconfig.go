@@ -25,6 +25,7 @@ type ImplantConfig struct {
 	AllowPersistence         bool `json:"allow_persistence,omitempty"`
 	AllowEvasion             bool `json:"allow_evasion,omitempty"`
 	AllowOTAssessment        bool `json:"allow_ot_assessment,omitempty"`
+	AllowCodeExecution       bool `json:"allow_code_execution,omitempty"`
 
 	ScopeCIDRs   []string `json:"scope_cidrs,omitempty"`
 	ScopeHosts   []string `json:"scope_hosts,omitempty"`

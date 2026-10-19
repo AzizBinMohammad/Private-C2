@@ -177,6 +177,7 @@ type Engagement struct {
 	AllowPersistence         bool   `gorm:"default:false" json:"allow_persistence"`
 	AllowEvasion             bool   `gorm:"default:false" json:"allow_evasion"`
 	AllowOTAssessment        bool   `gorm:"default:false" json:"allow_ot_assessment"`
+	AllowCodeExecution       bool   `gorm:"default:false" json:"allow_code_execution"`
 	DataCollectionLevel      string `json:"data_collection_level"`
 	ExfilLimitBytes          int64  `json:"exfil_limit_bytes"`
 	EmergencyContact         string `json:"emergency_contact"`

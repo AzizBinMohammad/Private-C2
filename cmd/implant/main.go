@@ -49,6 +49,7 @@ var (
 	agentAllowPersistence bool
 	agentAllowEvasion     bool
 	agentAllowOT          bool
+	agentAllowExecution   bool
 
 	errKillSwitch = errors.New("kill switch activated")
 )
@@ -295,6 +296,7 @@ func main() {
 	allowPersistence := flag.Bool("allow-persistence", embedded.AllowPersistence, "permit persistence tasks")
 	allowEvasion := flag.Bool("allow-evasion", embedded.AllowEvasion, "permit evasion tasks")
 	allowOT := flag.Bool("allow-ot", embedded.AllowOTAssessment, "permit OT/ICS assessment tasks")
+	allowExecution := flag.Bool("allow-code-execution", embedded.AllowCodeExecution, "permit in-memory code execution tasks (BOF/COFF)")
 	flag.Parse()
 
 	agentAllowPrivilege = *allowPrivilege
@@ -303,6 +305,7 @@ func main() {
 	agentAllowPersistence = *allowPersistence
 	agentAllowEvasion = *allowEvasion
 	agentAllowOT = *allowOT
+	agentAllowExecution = *allowExecution
 
 	setFlags := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
@@ -596,6 +599,10 @@ func checkTaskSafety(ctx context.Context, t protocol.TaskWire) error {
 	case protocol.CategoryEvasion:
 		if !agentAllowEvasion {
 			return fmt.Errorf("refused: evasion is not enabled for this engagement")
+		}
+	case protocol.CategoryExecution:
+		if !agentAllowExecution {
+			return fmt.Errorf("refused: code execution is not enabled for this engagement")
 		}
 	}
 	if agentAllowlist != nil && agentAllowlist.IsEnabled() {
