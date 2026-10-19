@@ -374,3 +374,41 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
   beaconing.
 * **What would conflict with it**: Treating the DB status as the only action,
   or claiming remote termination of v1 implants (v1 has no kill message).
+
+## HTTPS Carrier: Streaming POST, Same Framed Protocol (2026-10-19)
+
+* **Decision**: The HTTPS carrier is a long-lived POST whose request body is
+  the implant-to-server stream and whose response body is the
+  server-to-implant stream. It reuses the existing register/checkin/result
+  loop rather than introducing a second session model.
+* **Why**: `server/c2/listener/https.go` used a cookie/base64 request-response
+  model that could not accept the live protocol. A streaming adapter keeps one
+  protocol engine and one session identity.
+* **What would conflict with it**: Buffering proxies that cannot stream a
+  request body, or a non-TLS listener. The handler rejects non-TLS requests.
+
+## Payload Builder: Overlay-Injected Config (2026-10-19)
+
+* **Decision**: `server/build.Build` generates a `config_gen.go`, maps it over
+  `cmd/implant/config_gen.go` with `go build -overlay`, and compiles with
+  `CGO_ENABLED=0`. The config embeds endpoints, CA/client certificate PEM,
+  engagement, sleep/jitter, safety limits, and mode. The source tree is not
+  modified.
+* **Why**: Runtime flags made "generated" payloads unusable without an
+  operator-provided command line. Writing generated files into the repo would
+  dirty the tree and race concurrent builds.
+* **What would conflict with it**: Formats that need CGO or a cross-toolchain
+  (DLL/shellcode/shared) are rejected with a clear error. Adding an external
+  builder is the intended path for those.
+
+## Audit: One Canonical Hash, One Writer (2026-10-19)
+
+* **Decision**: `audit.ComputeEntryHash` hashes every field (including
+  engagement, session, target, metadata, source IP, and correlation ID) using
+  timestamp nanoseconds. `auditwriter.Writer` persists the chain and refuses a
+  discontinuity. Verification and export use the same library.
+* **Why**: The previous library and API hashes disagreed, the table had no
+  writer, and fields outside the six-field subset could be tampered with
+  without breaking the chain.
+* **What would conflict with it**: Storing entries without `TimestampUnixNano`,
+  or writing audit rows outside the writer (which would break continuity).

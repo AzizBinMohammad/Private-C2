@@ -322,12 +322,14 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
   tasks, dispatches, and results now persist through `c2.Persistence` /
   `c2.GORMPersistence`, and queued tasks are rebound by `ImplantID`. See
   `docs/phase1-status-2026-10-19.md`.
-- **Builder is a stub**: `cmd/builder/main.go` only prints usage and exits.
-  Payloads are still built by `buildImplant()` without embedded configuration.
-- **HTTPS/DNS/WireGuard carriers are not live**: only mTLS accepts the framed
-  protocol. `server/c2/listener/*` uses a different session model.
-- **Audit writer is missing**: audit entries are still read-only; the two hash
-  implementations remain incompatible.
+- **Builder CLI is still a stub**: `cmd/builder/main.go` only prints usage.
+  The server-side builder (`server/build.Build`) now produces self-contained
+  payloads with embedded configuration.
+- **mTLS and HTTPS carriers are live.** HTTPS uses a streaming POST and the
+  same framed protocol. DNS/WireGuard remain unwired; `server/c2/listener/*`
+  uses a different session model.
+- **Audit writer is live**: `server/store/auditwriter` persists the canonical
+  hash chain, and `/api/audit/export` supports JSON/CEF/LEEF.
 - **RBAC is now enforced on the REST API** via `server/api/authz` (roles:
   `admin`, `operator`, `builder`, `observer`, `ot-operator`). Engagement policy
   (scope, time window, authorized techniques, kill switch) is enforced before

@@ -4,13 +4,13 @@ A full-featured Command and Control framework built in Go 1.23 for **authorized 
 
 ## Features
 
-- **C2 transport**: a live mTLS listener with protocol v2 negotiation; HTTPS, DNS, WireGuard, and pivot transport libraries exist but are not yet wired into the live listener path
+- **C2 transport**: live mTLS and streaming-HTTPS carriers with protocol v2 negotiation; DNS, WireGuard, and pivot transport libraries exist but are not yet wired into the live listener path
 - **Engagement scoping**: CIDR, hostname, and domain-based scope enforcement with an operational kill switch (closes sessions, blocks tasking)
 - **Cryptography**: XChaCha20-Poly1305 AEAD, X25519 key exchange, Ed25519 signing, ECDSA P-384 PKI
 - **Cross-platform implant**: Windows, Linux, macOS, FreeBSD, OpenBSD, NetBSD across amd64/arm64/386 (mTLS over CGO-free Go builds)
 - **Durable state**: sessions, tasks, dispatches, and results persist to SQLite/PostgreSQL; queued tasks rebind after reconnect/restart
 - **Background tasking**: bounded worker pool with per-task timeouts, panic recovery, output caps, and continued check-ins
-- **Build pipeline**: server-side cross-compilation (payload configuration embedding is still in progress)
+- **Build pipeline**: server-side cross-compilation with embedded server/trust/safety configuration (payloads run without runtime flags)
 - **mTLS implant listener**: client certificates are required and verified against the engagement CA
 - **RBAC**: admin, operator, ot-operator, builder, observer roles enforced on the REST API (`server/api/authz`)
 - **OT/ICS assessment**: 17 industrial protocol clients (Modbus, OPC UA, S7, DNP3, etc.), all strictly read-only

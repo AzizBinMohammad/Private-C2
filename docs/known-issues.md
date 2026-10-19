@@ -320,14 +320,23 @@ Branch `feat/redteam-workflow`. Full detail in
   now closes sessions and blocks tasking.
 - Inline serial task execution and unsupported portal task types.
 
+### Also resolved in the final Phase 1 cut
+
+- HTTPS carrier using a streaming POST and the framed protocol, verified
+  end-to-end alongside mTLS.
+- `server/build.Build` embeds server/trust/safety configuration with
+  `go build -overlay`; a generated payload runs with no flags. DLL, shellcode,
+  and shared-library formats are rejected rather than faked.
+- Audit writer (`server/store/auditwriter`), canonical full-field hash,
+  middleware plus explicit events, and `/api/audit/export` (JSON/CEF/LEEF).
+
 ### Still open
 
-- HTTPS/DNS/WireGuard carriers (only mTLS accepts the framed protocol).
-- Payloads are not self-contained: `buildImplant()` embeds no server address,
-  trust material, mode, sleep/jitter, or engagement.
-- Audit has no live writer, two incompatible hash implementations remain, and
-  `/api/audit/export` is missing.
-- Config is flag-based; `server/config` is still unused by `cmd/server`.
+- DNS/WireGuard carriers (mTLS and HTTPS are live).
+- Config is flag-based for the most part; `server/config` is still unused by
+  `cmd/server` (payload config is embedded).
 - SSE/event-bus integration and metrics instrumentation.
 - Migration ledger / pre-DDL SQLite backup.
-- `client/cli/commands` remains dead code; `cmd/mcp` still has its own client.
+- Restart proof in the e2e script (persistence itself is covered by tests).
+- `cmd/builder` remains a usage stub; `client/cli/commands` remains dead code;
+  `cmd/mcp` still has its own client.

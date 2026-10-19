@@ -78,36 +78,59 @@ remain Phase 1 work.
 - Added `pkg/taskargs` so the server and implant agree on which target a task
   will act on.
 
+### HTTPS carrier
+- Added a streaming HTTPS carrier (`server/c2/https_carrier.go`): the request
+  body carries implant-to-server frames and the response body carries
+  server-to-implant frames, so the existing framed protocol is reused.
+- Server flags `--https-listen` and `--https-path`; the carrier requires TLS
+  and inherits the listener's client-certificate policy. The implant uses
+  `--https-url` (or the embedded config's `https_url`).
+- Verified end-to-end with a real HTTPS implant.
+
+### Config-embedded payload builder
+- Added `server/build.Build` with `go build -overlay`; generated
+  `config_gen.go` is injected without modifying the source tree.
+- The embedded config carries server/HTTPS endpoint, CA and client certificate
+  PEM, engagement ID, sleep/jitter, safety scope/window/kill date/quota, and
+  safe-mode. Implant flags default to embedded values but can override them.
+- `payloads.go` now uses the builder; `exe`, `ps1`, and `sh` are supported.
+  `dll`, `shellcode`, and `shared` are rejected with a 400 rather than emitting
+  fake artifacts.
+- Verified a built payload runs with **no flags**, registers over mTLS, and
+  executes a task.
+
+### Audit writer and export
+- Added `server/store/auditwriter` with chain-head loading and discontinuity
+  refusal; the REST API writes audit entries through `pkg/audit.Logger`.
+- The canonical hash now covers engagement, session, target, metadata, source
+  IP, and correlation ID, and verification uses the same function.
+- Login/logout, task queueing, kill switch, and payload build/revoke write
+  explicit events; all mutating API requests are recorded by middleware.
+- Added `GET /api/audit/export?format=json|cef|leef`.
+
 ## Verification
 
 - `make test` (all 9 modules, `-race`): pass.
 - `make lint` (go vet): pass.
 - `make build`, `make cross-compile`: pass.
-- `make e2e-smoke`: passes against real `private-c2-server` + `implant`
-  binaries over mTLS: v2 registration, session token, `pwd` task round-trip,
-  persisted history, and persisted task state.
+- `make e2e-smoke`: passes against real binaries for mTLS, HTTPS, and a
+  config-embedded payload built by the API and run with no flags; each path
+  completes a `pwd` task round-trip. Persisted history and task state are
+  checked.
 - New tests cover protocol compatibility, frame bounds, result ownership,
   requeueing, reconnect supersession, listener stop, task runner, safety,
   persistence (fake + GORM), session history, auth hydration/revocation, RBAC,
-  engagement policy, and the kill switch.
+  engagement policy, kill switch, audit writer/chain/export, and the payload
+  builder (including proof that `-overlay` does not modify the source tree).
 
 ## Remaining Phase 1 work
 
-1. **HTTPS carrier** that carries the same framed protocol. The current
-   `server/c2/listener/https.go` uses a different session model and cannot be
-   substituted. Do not claim an HTTPS listener until an end-to-end test passes.
-2. **Config-embedded payload builder.** `buildImplant()` still runs
-   `go build ./cmd/implant` without embedding the server address, trust
-   material, mode, sleep/jitter, or engagement. Built payloads still require
-   runtime flags. DLL/shellcode/shared formats remain rejected rather than
-   producing fake artifacts.
-3. **Audit writer and export.** The audit table still has no live writer, and
-   the two hash implementations remain unreconciled. `/api/audit/export` is
-   still missing.
-4. **Event bus / SSE** for live UI updates.
-5. **Config wiring** (`PC2_*` env vars vs flags) and a migration ledger/SQLite
+1. **Event bus / SSE** for live UI updates.
+2. **Config wiring** (`PC2_*` env vars vs flags) and a migration ledger/SQLite
    backup before DDL.
-6. **Metrics instrumentation** (registered but still never incremented).
+3. **Metrics instrumentation** (registered but still never incremented).
+4. **Restart proof in CI**: persistence is covered by tests, but the e2e smoke
+   script does not restart the server mid-run.
 
 Phase 2 (credential access, lateral movement, persistence, BOF/COFF, evasion,
 OT execution) has not started.
