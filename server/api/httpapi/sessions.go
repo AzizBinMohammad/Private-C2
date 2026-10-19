@@ -93,7 +93,14 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 		}
 		taskID, err := sh.implantServer.QueueTask(sessionID, req.Type, req.Args)
 		if err != nil {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
+			status := http.StatusInternalServerError
+			switch {
+			case errors.Is(err, c2.ErrSessionNotFound):
+				status = http.StatusNotFound
+			case errors.Is(err, c2.ErrUnsupportedTaskType), errors.Is(err, c2.ErrTaskQueueFull):
+				status = http.StatusBadRequest
+			}
+			writeJSON(w, status, ErrorResponse{Error: err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusCreated, TaskResponse{TaskID: taskID})

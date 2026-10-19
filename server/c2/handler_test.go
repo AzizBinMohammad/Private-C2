@@ -653,3 +653,143 @@ func TestListSessions_ReturnsCopies(t *testing.T) {
 		t.Error("mutating the returned copy changed live session state")
 	}
 }
+
+// ── Regression tests for result binding, requeueing, and reconnects ──
+
+func TestHandleResult_RejectsForeignSession(t *testing.T) {
+	srv := NewImplantServer()
+
+	serverA, clientA := net.Pipe()
+	defer clientA.Close()
+	go srv.HandleConnection(serverA)
+	sessionA := register(t, clientA)
+
+	serverB, clientB := net.Pipe()
+	defer clientB.Close()
+	go srv.HandleConnection(serverB)
+	regB := makeRegisterData()
+	regB.ImplantID = "implant-002"
+	sendMsg(t, clientB, "register", regB)
+	if ack := recvMsg(t, clientB); ack.Type != "register_ack" {
+		t.Fatalf("expected register_ack for B, got %q", ack.Type)
+	}
+
+	taskID, err := srv.QueueTask(sessionA, "shell", "id")
+	if err != nil {
+		t.Fatalf("QueueTask: %v", err)
+	}
+
+	// Dispatch task to A.
+	sendMsg(t, clientA, "checkin", protocol.CheckinData{SessionID: sessionA})
+	if tasking := recvMsg(t, clientA); tasking.Type != "tasking" {
+		t.Fatalf("expected tasking, got %q", tasking.Type)
+	}
+
+	// B tries to claim A's task.
+	sendMsg(t, clientB, "result", protocol.ResultData{
+		SessionID: sessionA,
+		TaskID:    taskID,
+		Success:   true,
+		Output:    "forged",
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if res := srv.GetResult(taskID); res != nil {
+			t.Fatalf("foreign result was accepted: %+v", res)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestHandleCheckin_RequeuesOnWriteFailure(t *testing.T) {
+	srv := NewImplantServer()
+	sessionID := "session-requeue"
+	srv.sessions[sessionID] = &ImplantSession{ID: sessionID}
+	srv.taskQueues[sessionID] = []*Task{{ID: "task-requeue", Type: "shell", Args: "id"}}
+
+	serverConn, clientConn := net.Pipe()
+	clientConn.Close() // every write to serverConn now fails
+
+	srv.handleCheckin(serverConn, sessionID, json.RawMessage(`{"session_id":"session-requeue"}`))
+	serverConn.Close()
+
+	if got := len(srv.taskQueues[sessionID]); got != 1 {
+		t.Fatalf("requeued tasks = %d, want 1", got)
+	}
+	if srv.taskQueues[sessionID][0].ID != "task-requeue" {
+		t.Fatalf("wrong task requeued: %+v", srv.taskQueues[sessionID][0])
+	}
+	if _, ok := srv.taskOwners["task-requeue"]; ok {
+		t.Fatal("requeued task still has an owner")
+	}
+}
+
+func TestHandleConnection_SupersedesSameImplant(t *testing.T) {
+	srv := NewImplantServer()
+
+	server1, client1 := net.Pipe()
+	defer client1.Close()
+	go srv.HandleConnection(server1)
+	session1 := register(t, client1)
+
+	taskID, err := srv.QueueTask(session1, "shell", "id")
+	if err != nil {
+		t.Fatalf("QueueTask: %v", err)
+	}
+
+	server2, client2 := net.Pipe()
+	defer client2.Close()
+	go srv.HandleConnection(server2)
+	session2 := register(t, client2) // same ImplantID as session1
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.GetSession(session1) == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sess := srv.GetSession(session1); sess != nil {
+		t.Fatalf("old session %s still live after reconnect", session1)
+	}
+	if sess := srv.GetSession(session2); sess == nil {
+		t.Fatalf("new session %s missing", session2)
+	}
+	if n := len(srv.ListSessions()); n != 1 {
+		t.Fatalf("live sessions = %d, want 1", n)
+	}
+	if got := len(srv.taskQueues[session2]); got != 1 || srv.taskQueues[session2][0].ID != taskID {
+		t.Fatalf("pending task was not transferred to the new session: %+v", srv.taskQueues[session2])
+	}
+}
+
+func TestHandleCheckin_V2RequiresSessionToken(t *testing.T) {
+	srv := NewImplantServer()
+	sessionID := "session-token"
+	srv.sessions[sessionID] = &ImplantSession{
+		ID:              sessionID,
+		ProtocolVersion: protocol.Version2,
+		SessionToken:    "correct-token",
+	}
+	srv.taskQueues[sessionID] = []*Task{{ID: "task-token", Type: "shell", Args: "id"}}
+
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	// Wrong token: no tasking may be written, and the queue must remain.
+	done := make(chan struct{})
+	go func() {
+		srv.handleCheckin(serverConn, sessionID, json.RawMessage(`{"session_id":"session-token","session_token":"wrong"}`))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handleCheckin blocked on a rejected token")
+	}
+	if got := len(srv.taskQueues[sessionID]); got != 1 {
+		t.Fatalf("queue length = %d, want 1 after rejected checkin", got)
+	}
+}
