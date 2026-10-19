@@ -28,6 +28,9 @@ import (
 )
 
 func init() {
+	// Most tests assert on exact audit-table contents; login events are
+	// covered by a dedicated test.
+	auditAuthEvents = false
 	hash, _ := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.MinCost)
 	newAuthManagerFn = func() *AuthManager {
 		return &AuthManager{

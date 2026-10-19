@@ -177,20 +177,21 @@ type Engagement struct {
 }
 
 type AuditEntry struct {
-	ID            string    `gorm:"type:uuid;primaryKey" json:"id"`
-	CreatedAt     time.Time `gorm:"index" json:"created_at"`
-	OperatorID    string    `gorm:"index" json:"operator_id"`
-	EngagementID  string    `gorm:"index" json:"engagement_id"`
-	SessionID     string    `gorm:"index" json:"session_id"`
-	EventType     string    `gorm:"index" json:"event_type"`
-	Action        string    `json:"action"`
-	Target        string    `json:"target"`
-	ResultSummary string    `json:"result_summary"`
-	Metadata      string    `gorm:"type:text" json:"metadata"` // JSON
-	SourceIP      string    `json:"source_ip"`
-	CorrelationID string    `gorm:"index" json:"correlation_id"`
-	PreviousHash  string    `json:"previous_hash"`
-	EntryHash     string    `json:"entry_hash"`
+	ID                string    `gorm:"type:uuid;primaryKey" json:"id"`
+	CreatedAt         time.Time `gorm:"index" json:"created_at"`
+	TimestampUnixNano int64     `gorm:"index" json:"timestamp_unix_nano,omitempty"`
+	OperatorID        string    `gorm:"index" json:"operator_id"`
+	EngagementID      string    `gorm:"index" json:"engagement_id"`
+	SessionID         string    `gorm:"index" json:"session_id"`
+	EventType         string    `gorm:"index" json:"event_type"`
+	Action            string    `json:"action"`
+	Target            string    `json:"target"`
+	ResultSummary     string    `json:"result_summary"`
+	Metadata          string    `gorm:"type:text" json:"metadata"` // JSON
+	SourceIP          string    `json:"source_ip"`
+	CorrelationID     string    `gorm:"index" json:"correlation_id"`
+	PreviousHash      string    `json:"previous_hash"`
+	EntryHash         string    `json:"entry_hash"`
 }
 
 type C2Profile struct {

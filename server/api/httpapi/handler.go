@@ -8,8 +8,10 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
 	"github.com/azizbinmohammad/private-c2/server/api/authz"
 	"github.com/azizbinmohammad/private-c2/server/c2"
+	"github.com/azizbinmohammad/private-c2/server/store/auditwriter"
 	"gorm.io/gorm"
 )
 
@@ -46,6 +48,16 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 		log.Printf("[api] failed to load operators: %v", err)
 	}
 
+	var auditor *audit.Logger
+	if db != nil {
+		if writer, err := auditwriter.New(db); err != nil {
+			log.Printf("[api] audit writer unavailable: %v", err)
+		} else {
+			auditor = audit.NewLoggerFromHead(writer.Head(), writer)
+		}
+	}
+	auth.SetAuditLogger(auditor)
+
 	mux := http.NewServeMux()
 
 	// ── Public: login + static UI ──
@@ -66,7 +78,7 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 
 	// ───────────────── Sessions ─────────────────
 
-	sh := &sessionHandler{implantServer: implantServer, db: db}
+	sh := &sessionHandler{implantServer: implantServer, db: db, auditor: auditor}
 	api.HandleFunc("/api/sessions", sh.handleSessions)
 	api.HandleFunc("/api/sessions/", sh.handleSessionDetail)
 	api.HandleFunc("/api/tasks/", sh.handleTaskResult)
@@ -87,13 +99,13 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 
 	// ───────────────── Engagements ─────────────────
 
-	eh := &engagementHandler{db: db, implantServer: implantServer}
+	eh := &engagementHandler{db: db, implantServer: implantServer, auditor: auditor}
 	api.HandleFunc("/api/engagements", eh.handleEngagements)
 	api.HandleFunc("/api/engagements/", eh.handleEngagementDetail)
 
 	// ───────────────── Payloads ─────────────────
 
-	ph := &payloadHandler{db: db}
+	ph := &payloadHandler{db: db, auditor: auditor}
 	api.HandleFunc("/api/payloads", ph.handlePayloads)
 	api.HandleFunc("/api/payloads/", ph.handlePayloadDetail)
 
@@ -125,7 +137,7 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 	api.HandleFunc("/api/ot/reports", oth.handleOTReports)
 
 	// ── Wire protected routes through authentication + authorization ──
-	protected := auth.Middleware(authz.Middleware(api))
+	protected := auth.Middleware(auditMiddleware(auditor, authz.Middleware(api)))
 	mux.Handle("/api/sessions", protected)
 	mux.Handle("/api/sessions/", protected)
 	mux.Handle("/api/tasks/", protected)

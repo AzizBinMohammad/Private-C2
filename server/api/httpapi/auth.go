@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
 	"github.com/azizbinmohammad/private-c2/server/api/authz"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"golang.org/x/crypto/bcrypt"
@@ -22,6 +23,7 @@ type AuthManager struct {
 	roles       map[string]string
 	operatorIDs map[string]string
 	tokens      map[string]*tokenEntry
+	auditor     *audit.Logger
 }
 
 type tokenEntry struct {
@@ -49,6 +51,21 @@ func NewAuthManager() *AuthManager {
 	}
 	am.ensureDefaultUser()
 	return am
+}
+
+// SetAuditLogger installs the audit sink used for login/logout events.
+func (am *AuthManager) SetAuditLogger(logger *audit.Logger) {
+	am.auditor = logger
+}
+
+// auditAuthEvents can be disabled by tests that assert on audit counts.
+var auditAuthEvents = true
+
+func (am *AuthManager) logAuth(operator string, event audit.EventType, action, result, sourceIP string) {
+	if am.auditor == nil || !auditAuthEvents {
+		return
+	}
+	_ = am.auditor.Log(operator, "", "", event, action, "", result, nil, sourceIP, "")
 }
 
 func (am *AuthManager) ensureDefaultUser() {
@@ -247,6 +264,7 @@ func (am *AuthManager) LoginHandler() http.HandlerFunc {
 		role, operatorID, ok := am.authenticateIdentity(req.Username, req.Password)
 		if !ok {
 			_ = subtle.ConstantTimeCompare([]byte("a"), []byte("b"))
+			am.logAuth(req.Username, audit.EventOperatorLogin, "login", "failure", r.RemoteAddr)
 			writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials"})
 			return
 		}
@@ -256,6 +274,7 @@ func (am *AuthManager) LoginHandler() http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to issue token"})
 			return
 		}
+		am.logAuth(req.Username, audit.EventOperatorLogin, "login", "success", r.RemoteAddr)
 		writeJSON(w, http.StatusOK, LoginResponse{Token: tok})
 	}
 }
@@ -273,9 +292,13 @@ func (am *AuthManager) LogoutHandler() http.HandlerFunc {
 			return
 		}
 		tok := bearerToken(r)
+		identity, _ := am.validateTokenIdentity(tok)
 		am.mu.Lock()
 		delete(am.tokens, tok)
 		am.mu.Unlock()
+		if identity.Username != "" {
+			am.logAuth(identity.Username, audit.EventOperatorLogout, "logout", "success", r.RemoteAddr)
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 	}
 }

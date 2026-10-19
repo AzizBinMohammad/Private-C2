@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
+	"github.com/azizbinmohammad/private-c2/pkg/taskargs"
+	"github.com/azizbinmohammad/private-c2/server/api/authz"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"github.com/azizbinmohammad/private-c2/server/store/repository"
@@ -18,6 +21,7 @@ import (
 type sessionHandler struct {
 	implantServer *c2.ImplantServer
 	db            *gorm.DB
+	auditor       *audit.Logger
 }
 
 func (sh *sessionHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +127,17 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 			}
 			writeJSON(w, status, ErrorResponse{Error: err.Error()})
 			return
+		}
+		if sh.auditor != nil {
+			identity, _ := authz.FromContext(r.Context())
+			operator := identity.OperatorID
+			if operator == "" {
+				operator = identity.Username
+			}
+			_ = sh.auditor.Log(operator, sess.EngagementID, sessionID,
+				audit.EventSessionInteract, "task."+req.Type,
+				taskargs.Target(req.Type, req.Args), "queued",
+				map[string]any{"task_id": taskID}, r.RemoteAddr, "")
 		}
 		writeJSON(w, http.StatusCreated, TaskResponse{TaskID: taskID})
 

@@ -121,6 +121,12 @@ func NewImplantServer() *ImplantServer {
 const registrationTimeout = 30 * time.Second
 
 func (s *ImplantServer) HandleConnection(conn net.Conn) {
+	s.HandleCarrierConnection(conn, "mtls")
+}
+
+// HandleCarrierConnection runs the register/checkin/result protocol over any
+// net.Conn-compatible carrier. transport is recorded on the session.
+func (s *ImplantServer) HandleCarrierConnection(conn net.Conn, transport string) {
 	defer conn.Close()
 	remoteAddr := conn.RemoteAddr().String()
 
@@ -172,7 +178,7 @@ func (s *ImplantServer) HandleConnection(conn net.Conn) {
 		Process:         reg.Process,
 		Mode:            reg.Mode,
 		RemoteAddr:      remoteAddr,
-		Transport:       "mtls",
+		Transport:       transport,
 		EngagementID:    reg.EngagementID,
 		ProtocolVersion: negotiated,
 		Capabilities:    append([]string(nil), reg.Capabilities...),

@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
 	"github.com/azizbinmohammad/private-c2/pkg/engagement"
+	"github.com/azizbinmohammad/private-c2/server/api/authz"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"gorm.io/gorm"
@@ -15,6 +18,7 @@ import (
 type engagementHandler struct {
 	db            *gorm.DB
 	implantServer *c2.ImplantServer
+	auditor       *audit.Logger
 }
 
 func (eh *engagementHandler) handleEngagements(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +134,16 @@ func (eh *engagementHandler) handleEngagementDetail(w http.ResponseWriter, r *ht
 		closed := 0
 		if eh.implantServer != nil {
 			closed = eh.implantServer.KillEngagement(engID, reason)
+		}
+		if eh.auditor != nil {
+			identity, _ := authz.FromContext(r.Context())
+			operator := identity.OperatorID
+			if operator == "" {
+				operator = identity.Username
+			}
+			_ = eh.auditor.Log(operator, engID, "", audit.EventKillSwitch,
+				"engagement.killswitch", engID,
+				fmt.Sprintf("sessions_closed=%d", closed), nil, r.RemoteAddr, "")
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":          "killed",

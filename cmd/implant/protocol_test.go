@@ -34,7 +34,7 @@ func TestRegisterNegotiatesV2(t *testing.T) {
 		_ = sendMessage(serverConn, &protocol.Message{Type: "register_ack", Data: ack})
 	}()
 
-	result, err := register(clientConn, protocol.RegisterData{ImplantID: "implant-1"}, "eng-1", 5*time.Second, 0.2)
+	result, err := register(clientConn, protocol.RegisterData{ImplantID: "implant-1"}, "eng-1", "mtls", 5*time.Second, 0.2)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestRegisterLegacyAckFallsBackToV1(t *testing.T) {
 		_ = sendMessage(serverConn, &protocol.Message{Type: "register_ack", Data: ack})
 	}()
 
-	result, err := register(clientConn, protocol.RegisterData{ImplantID: "implant-1"}, "", 5*time.Second, 0)
+	result, err := register(clientConn, protocol.RegisterData{ImplantID: "implant-1"}, "", "mtls", 5*time.Second, 0)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestRegisterHonorsKillInstruction(t *testing.T) {
 		_ = sendMessage(serverConn, &protocol.Message{Type: "register_ack", Data: ack})
 	}()
 
-	result, err := register(clientConn, protocol.RegisterData{ImplantID: "implant-1"}, "", 5*time.Second, 0)
+	result, err := register(clientConn, protocol.RegisterData{ImplantID: "implant-1"}, "", "mtls", 5*time.Second, 0)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
