@@ -16,6 +16,7 @@ import (
 	"github.com/azizbinmohammad/private-c2/server/api/httpapi"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store"
+	"github.com/azizbinmohammad/private-c2/server/store/repository"
 	"github.com/azizbinmohammad/private-c2/server/telemetry"
 )
 
@@ -55,6 +56,15 @@ func main() {
 
 	// --- Core C2 server ---
 	implantServer := c2.NewImplantServer()
+	persistence := c2.NewGORMPersistence(
+		repository.NewSessionRepository(db),
+		repository.NewTaskRepository(db),
+	)
+	// Sessions marked active from a previous process cannot still be live.
+	if err := persistence.MarkLiveSessionsDisconnected(context.Background()); err != nil {
+		log.Printf("Failed to reconcile previous sessions: %v", err)
+	}
+	implantServer.SetPersistence(persistence)
 
 	// --- TLS listener for implants ---
 	//

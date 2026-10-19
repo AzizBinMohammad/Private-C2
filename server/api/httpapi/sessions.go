@@ -4,15 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/azizbinmohammad/private-c2/server/c2"
+	"github.com/azizbinmohammad/private-c2/server/store/models"
+	"github.com/azizbinmohammad/private-c2/server/store/repository"
+	"gorm.io/gorm"
 )
 
 // sessionHandler serves live implant sessions. Sessions are held in memory
 // (docs/decisions.md), so this handler needs no database access.
 type sessionHandler struct {
 	implantServer *c2.ImplantServer
+	db            *gorm.DB
 }
 
 func (sh *sessionHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +46,10 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if path == "history" {
+		sh.handleSessionHistory(w, r)
+		return
+	}
 	parts := strings.SplitN(path, "/", 2)
 	sessionID := parts[0]
 
@@ -105,6 +114,9 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 		}
 		writeJSON(w, http.StatusCreated, TaskResponse{TaskID: taskID})
 
+	case "tasks":
+		sh.handleSessionTasks(w, r, sessionID)
+
 	case "lock":
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
@@ -165,9 +177,91 @@ func (sh *sessionHandler) handleTaskResult(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	result := sh.implantServer.GetResult(taskID)
+	if result == nil && sh.db != nil {
+		var row models.TaskResult
+		if err := sh.db.First(&row, "task_id = ?", taskID).Error; err == nil {
+			writeJSON(w, http.StatusOK, c2.TaskResult{
+				TaskID:      row.TaskID,
+				SessionID:   row.SessionID,
+				Success:     row.Success,
+				Output:      row.Output,
+				Error:       row.Error,
+				Truncated:   row.Truncated,
+				Bytes:       row.Bytes,
+				CompletedAt: row.CompletedAt,
+			})
+			return
+		}
+	}
 	if result == nil {
 		writeJSON(w, http.StatusOK, PendingResponse{Status: "pending"})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (sh *sessionHandler) handleSessionHistory(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
+		return
+	}
+	if sh.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: "database unavailable"})
+		return
+	}
+
+	engagementID := r.URL.Query().Get("engagement_id")
+	limit := parseLimit(r.URL.Query().Get("limit"), 100)
+	rows, err := repository.NewSessionRepository(sh.db).List(engagementID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+func (sh *sessionHandler) handleSessionTasks(w http.ResponseWriter, r *http.Request, sessionID string) {
+	setCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
+		return
+	}
+	if sh.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: "database unavailable"})
+		return
+	}
+
+	limit := parseLimit(r.URL.Query().Get("limit"), 100)
+	rows, err := repository.NewTaskRepository(sh.db).ListBySession(sessionID, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+func parseLimit(raw string, def int) int {
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return def
+	}
+	if n > 1000 {
+		return 1000
+	}
+	return n
 }

