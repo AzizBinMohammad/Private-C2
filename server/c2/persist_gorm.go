@@ -30,6 +30,7 @@ func (p *GORMPersistence) SessionRegistered(_ context.Context, session *ImplantS
 		RemoteAddr:   session.RemoteAddr,
 		Transport:    session.Transport,
 		Mode:         session.Mode,
+		Elevated:     session.Elevated,
 		HealthStatus: "active",
 		EngagementID: session.EngagementID,
 		LockedBy:     session.LockedBy,

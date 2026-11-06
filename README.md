@@ -12,6 +12,7 @@ A full-featured Command and Control framework built in Go 1.23 for **authorized 
 - **Background tasking**: bounded worker pool with per-task timeouts, panic recovery, output caps, and continued check-ins
 - **Build pipeline**: server-side cross-compilation with embedded server/trust/safety configuration (payloads run without runtime flags)
 - **mTLS implant listener**: client certificates are required and verified against the engagement CA
+- **Session identity UI**: each implant renders as a workstation carrying its OS mark; live sessions get an electric ring, and elevated (root/SYSTEM) hosts add a lightning bolt and a red screen
 - **RBAC**: admin, operator, ot-operator, builder, observer roles enforced on the REST API (`server/api/authz`)
 - **OT/ICS assessment**: 17 industrial protocol clients (Modbus, OPC UA, S7, DNP3, etc.), all strictly read-only
 - **Audit trail**: Append-only with SHA256 hash chaining, exportable as JSON/CEF/LEEF

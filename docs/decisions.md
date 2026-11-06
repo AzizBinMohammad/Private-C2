@@ -560,3 +560,20 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
   Reusing the existing models keeps the schema stable.
 * **What would conflict with it**: Imports without the OT gate, or schema
   changes that make task output incompatible with the mapping structs.
+
+## Session Elevation Is Reported by the Implant (2026-11-06)
+
+* **Decision**: The implant reports whether it holds admin/root rights in
+  `RegisterData.Elevated` (`euid == 0` on Unix, a UAC-elevated token on
+  Windows). The server keeps it on the live `ImplantSession`, persists it to
+  `models.Session.Elevated`, and exposes it as `elevated` from `/api/sessions`
+  and the beacon view. The portal uses it to mark an owned host as privileged.
+* **Why**: "Which compromised host is SYSTEM/root?" is the first question an
+  operator asks, and it was previously only discoverable by spending a task on
+  `whoami`-style enumeration. It is advisory metadata for the UI, not an
+  authorization signal: tasking remains gated by the engagement policy.
+* **What would conflict with it**: Treating `elevated` as an authorization
+  decision — it is self-reported by the implant and can change
+  (token theft, UAC filtering) mid-session. Implants older than this field
+  report nothing, which decodes as `false`; that must stay a safe default
+  rather than being inferred from the username.

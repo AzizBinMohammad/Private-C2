@@ -19,6 +19,10 @@ type RegisterData struct {
 	PID       int    `json:"pid"`
 	Process   string `json:"process"`
 	Mode      string `json:"mode"`
+	// Elevated reports whether the implant holds admin/root-level rights on
+	// the host. It is advisory metadata for the portal, not an authorization
+	// signal: tasking is still gated by the engagement policy server-side.
+	Elevated bool `json:"elevated,omitempty"`
 
 	// v2 additions.
 	ProtocolVersion int      `json:"protocol_version,omitempty"`

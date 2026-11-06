@@ -28,6 +28,7 @@ type ImplantSession struct {
 	PID             int       `json:"pid"`
 	Process         string    `json:"process"`
 	Mode            string    `json:"mode"`
+	Elevated        bool      `json:"elevated"`
 	RemoteAddr      string    `json:"remote_addr"`
 	Transport       string    `json:"transport"`
 	EngagementID    string    `json:"engagement_id,omitempty"`
@@ -177,6 +178,7 @@ func (s *ImplantServer) HandleCarrierConnection(conn net.Conn, transport string)
 		PID:             reg.PID,
 		Process:         reg.Process,
 		Mode:            reg.Mode,
+		Elevated:        reg.Elevated,
 		RemoteAddr:      remoteAddr,
 		Transport:       transport,
 		EngagementID:    reg.EngagementID,

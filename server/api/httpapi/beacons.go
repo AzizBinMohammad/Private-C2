@@ -39,6 +39,7 @@ type beaconView struct {
 	Username     string    `json:"username"`
 	OS           string    `json:"os"`
 	Arch         string    `json:"arch"`
+	Elevated     bool      `json:"elevated,omitempty"`
 	RemoteAddr   string    `json:"remote_addr,omitempty"`
 	Transport    string    `json:"transport,omitempty"`
 	EngagementID string    `json:"engagement_id,omitempty"`
@@ -118,6 +119,7 @@ func (bh *beaconHandler) handleBeacons(w http.ResponseWriter, r *http.Request) {
 			Username:    s.Username,
 			OS:          s.OS,
 			Arch:        s.Arch,
+			Elevated:    s.Elevated,
 			RemoteAddr:  s.RemoteAddr,
 			Transport:   s.Transport,
 			LastCheckin: s.LastCheckin,

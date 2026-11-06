@@ -306,7 +306,7 @@ graph TD
 | Step | File | Function / Line | What happens |
 |------|------|-----------------|--------------|
 | 1 | `cmd/implant/main.go:237-244` | `connect()` | TLS dial to server with `tls.DialWithDialer`, TLS 1.3 minimum |
-| 2 | `cmd/implant/main.go:123-139` | `collectSystemInfo()` | Gathers hostname, username, OS, arch, PID, process name. Generates 16-char hex implant ID |
+| 2 | `cmd/implant/main.go:123-139` | `collectSystemInfo()` | Gathers hostname, username, OS, arch, PID, process name, and the advisory `elevated` flag (root on Unix, elevated UAC token on Windows). Generates 16-char hex implant ID |
 | 3 | `cmd/implant/main.go:246-270` | `register()` | Marshals `RegisterData` to JSON, wraps in `Message{Type:"register"}`, sends via `envelope.WriteFrame` (4-byte length prefix + JSON) |
 | 4 | `cmd/server/main.go:74-89` | accept loop | `tlsListener.Accept()` → `implantServer.HandleConnection(conn)` in goroutine |
 | 5 | `server/c2/handler.go:121-148` | `ImplantServer.HandleConnection()` | Reads first frame with `envelope.ReadFrame`, unmarshals `Message`, expects `Type == "register"`, unmarshals `RegisterData` |
@@ -446,9 +446,9 @@ The `/api/engagements/{id}/scope-check` endpoint checks scope with `strings.Cont
 
 ### 8. Embedded Web Portal
 
-**File**: `server/api/httpapi/webui/index.html` (1732 lines)
+**File**: `server/api/httpapi/webui/index.html` (4605 lines)
 
-The entire web portal (HTML + CSS + JavaScript) is in one embedded file. It calls every API endpoint and manages frontend state in vanilla JS. Any change to an API response shape requires finding and updating the corresponding JS rendering code within this single file.
+The entire web portal (HTML + CSS + JavaScript) is in one embedded file. It calls every API endpoint and manages frontend state in vanilla JS. Any change to an API response shape requires finding and updating the corresponding JS rendering code within this single file. The sessions table draws each host as a workstation mark with its OS logo on screen; live sessions are ringed in red and elevated ones carry a bolt, driven by the `elevated` field on `GET /api/sessions`.
 
 **Risk**: API response changes require manual updates to the embedded HTML. No build step or type checking catches mismatches between API and frontend.
 

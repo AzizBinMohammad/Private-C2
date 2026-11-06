@@ -100,6 +100,7 @@ func collectSystemInfo() protocol.RegisterData {
 		PID:       os.Getpid(),
 		Process:   filepath.Base(os.Args[0]),
 		Mode:      "beacon",
+		Elevated:  processElevated(),
 	}
 }
 
