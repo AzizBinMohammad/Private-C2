@@ -166,6 +166,16 @@
     margin: 20px 0 0; font-family: var(--font-mono); font-size: 10.5px;
     letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
   }
+  .shots { display: grid; gap: 34px; margin-top: 34px; }
+  .shot { margin: 0; min-width: 0; }
+  .shot img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 4px; background: var(--surface);
+  }
+  .shot figcaption {
+    margin-top: 10px; font-family: var(--font-mono); font-size: 10.5px;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  }
 
   .mechanisms {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -611,6 +621,19 @@
           <li>Keeps its own HTTP client for now</li>
         </ul>
       </div>
+    </div>
+
+    <div class="shots">
+      <figure class="shot">
+        <img src="assets/sessions.png" width="1600" height="578" decoding="async"
+             alt="Sessions table in the Private-C2 portal. Each implant is drawn as a workstation carrying its OS mark, with platform filter counts above; live hosts are ringed in red and elevated hosts carry a bolt.">
+        <figcaption>Sessions &mdash; OS mark, liveness and elevation per host</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="assets/dashboard.png" width="1600" height="746" decoding="async"
+             alt="Dashboard in the Private-C2 portal: active session, beacon, listener and engagement counters, a server runtime panel, and recent sessions with OS marks.">
+        <figcaption>Dashboard &mdash; counters, runtime, and the recent session tail</figcaption>
+      </figure>
     </div>
 
     <div class="table-wrap">
