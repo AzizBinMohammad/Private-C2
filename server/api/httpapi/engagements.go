@@ -2,16 +2,23 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
 	"github.com/azizbinmohammad/private-c2/pkg/engagement"
+	"github.com/azizbinmohammad/private-c2/server/api/authz"
+	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"gorm.io/gorm"
 )
 
 type engagementHandler struct {
-	db *gorm.DB
+	db            *gorm.DB
+	implantServer *c2.ImplantServer
+	auditor       *audit.Logger
 }
 
 func (eh *engagementHandler) handleEngagements(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +115,14 @@ func (eh *engagementHandler) handleEngagementDetail(w http.ResponseWriter, r *ht
 			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
 			return
 		}
-		res := eh.db.Model(&models.Engagement{}).Where("id = ?", engID).Update("status", "killed")
+		reason := "operator activated kill switch"
+		now := time.Now()
+		res := eh.db.Model(&models.Engagement{}).Where("id = ?", engID).Updates(map[string]any{
+			"status":             "killed",
+			"kill_switch_active": true,
+			"killed_at":          &now,
+			"kill_reason":        reason,
+		})
 		if res.Error != nil {
 			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: res.Error.Error()})
 			return
@@ -117,7 +131,24 @@ func (eh *engagementHandler) handleEngagementDetail(w http.ResponseWriter, r *ht
 			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "engagement not found"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "killed"})
+		closed := 0
+		if eh.implantServer != nil {
+			closed = eh.implantServer.KillEngagement(engID, reason)
+		}
+		if eh.auditor != nil {
+			identity, _ := authz.FromContext(r.Context())
+			operator := identity.OperatorID
+			if operator == "" {
+				operator = identity.Username
+			}
+			_ = eh.auditor.Log(operator, engID, "", audit.EventKillSwitch,
+				"engagement.killswitch", engID,
+				fmt.Sprintf("sessions_closed=%d", closed), nil, r.RemoteAddr, "")
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":          "killed",
+			"sessions_closed": closed,
+		})
 
 	case "scope-check":
 		if r.Method != http.MethodPost {

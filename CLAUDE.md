@@ -45,7 +45,7 @@ Private-C2/
                            #   operators, audit, OT endpoints, server status
         auth.go            # Bearer-token auth: bcrypt password hashing, token
                            #   issuance (12h TTL), middleware
-        webui/index.html   # Embedded single-page web portal (1732 lines)
+        webui/index.html   # Embedded single-page web portal (4605 lines)
       grpc/                # gRPC service stubs (engagement, operator, OT)
       middleware/          # Middleware stubs (audit, auth, OT auth, rate limit, RBAC)
     build/
@@ -95,7 +95,16 @@ Private-C2/
                            #   system info collection (platform-specific: darwin,
                            #   linux, windows, default)
     modules/
+      bof/                 # AMD64 COFF parser/relocator and Windows BOF
+                           #   execution with a Beacon API subset
+      credential/          # Credential enumeration, secret reads, LSASS/
+                           #   registry dumps, DPAPI decrypt (gated)
       filesystem/          # File operations module
+      lateral/             # SSH, WinRM, and WMI lateral adapters (gated)
+      persist/             # Shell/systemd/cron and Windows registry/schtasks
+                           #   persistence with deterministic artifact IDs
+      pivot/               # SOCKS5, TCP port-forward, and Windows named-pipe
+                           #   pivots with per-connection scope checks
       logs/                # Log collection (platform-specific + timestomping)
       network/             # Network recon module
       nmap/                # nmap on the target. nmap.go: availability check
@@ -110,7 +119,9 @@ Private-C2/
                            #   testing, vulnerability scanning, compliance analysis,
                            #   topology mapping, traffic capture, HMI scanning,
                            #   wireless detection, PLC logic analysis, serial comms
-      process/             # Process listing (platform-specific)
+      process/             # Process list/kill/suspend/resume (platform-specific)
+      token/               # Windows token list/steal/make/impersonate/revert;
+                           #   non-Windows builds return ErrUnsupported
       screenshot/          # Screenshot capture
       shell/               # Shell command execution (Unix/Windows)
     safety/
@@ -130,6 +141,8 @@ Private-C2/
       pivot/               # Peer-to-peer pivot transport
     evasion/
       stealth/             # Anti-forensics: trace cleanup
+      patch/               # AMSI/ETW in-memory patches (Windows, gated)
+      spawn/               # Parent-PID-spoofed process creation (Windows)
       syscalls/            # Direct syscall invocation (Windows-specific)
 
   pkg/                     # Shared library modules
@@ -318,8 +331,24 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
 - **Session manager not integrated**: `server/core/sessions.go` (state machine with health checking) is not used by `server/c2/handler.go` which tracks sessions in its own maps.
 - **Integration tests are all stubs**: every test in `tests/integration/` calls `t.Skip("requires full server/implant stack")`.
 - **No unit tests** for `server/`, `client/`, or `implant/` packages. Only `pkg/` has unit tests.
-- **In-memory task results**: task queues and results in `ImplantServer` are not persisted, so they're lost on server restart.
-- **Builder is a stub**: `cmd/builder/main.go` only prints usage and exits.
+- ~~**In-memory task results**~~ **PARTIALLY RESOLVED (2026-10-19)**: sessions,
+  tasks, dispatches, and results now persist through `c2.Persistence` /
+  `c2.GORMPersistence`, and queued tasks are rebound by `ImplantID`. See
+  `docs/phase1-status-2026-10-19.md`.
+- **Builder CLI is still a stub**: `cmd/builder/main.go` only prints usage.
+  The server-side builder (`server/build.Build`) now produces self-contained
+  payloads with embedded configuration.
+- **mTLS and HTTPS carriers are live.** HTTPS uses a streaming POST and the
+  same framed protocol. DNS/WireGuard remain unwired; `server/c2/listener/*`
+  uses a different session model.
+- **Audit writer is live**: `server/store/auditwriter` persists the canonical
+  hash chain, and `/api/audit/export` supports JSON/CEF/LEEF.
+- **RBAC is now enforced on the REST API** via `server/api/authz` (roles:
+  `admin`, `operator`, `builder`, `observer`, `ot-operator`). Engagement policy
+  (scope, time window, authorized techniques, kill switch) is enforced before
+  task queueing; the implant re-checks its own safety configuration.
+- **Protocol v2 is negotiated**: v1 JSON remains supported; v2 adds session
+  tokens, server-controlled heartbeat, kill tasking, and per-task timeouts.
 
 ### Security Concerns
 - Default `admin`/`admin` credentials are hardcoded in `auth.go:ensureDefaultUser()`.
@@ -333,6 +362,18 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
 ### Known Issue Tracking
 - `docs/known-issues.md` is the authoritative defect list.
 - `docs/audit-2026-10-15.md` is the full audit: per-phase verification, CLI↔UI feature matrix, and prioritized roadmap.
+- `docs/phase1-status-2026-10-19.md` records the first Phase 1 implementation
+  cut, what was verified, and what remains (HTTPS carrier, embedded payload
+  builder, audit writer/export, SSE, config wiring, migration ledger).
+- `docs/phase2-status-2026-10-19.md` records the Phase 2 cut: engagement
+  capability gates (including code execution), OT task execution and finding
+  persistence/reporting, process/token operations, credential access (including
+  LSASS/DPAPI/Kerberos), SSH/WinRM/WMI lateral movement, SOCKS5/port-forward/
+  named-pipe pivots, PowerShell/Python/.NET/BOF execution, AMSI/ETW/PPID
+  evasion, persistence, encrypted loot with redaction, and signed plugin
+  manifests. It also lists what remains (in-process CLR, SMB/PsExec, reverse
+  forwarding, sleep obfuscation, browser SQLite decryption) and that Windows
+  paths are cross-compiled but not run on a Windows lab host here.
 - `docs/prompt-template.md` is the template for requesting new features, and lists the project facts worth stating up front (notably: which packages are live vs. unreachable).
 
 ### Writing Requirements for New Work

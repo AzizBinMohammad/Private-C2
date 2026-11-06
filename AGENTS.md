@@ -45,7 +45,7 @@ Private-C2/
                            #   operators, audit, OT endpoints, server status
         auth.go            # Bearer-token auth: bcrypt password hashing, token
                            #   issuance (12h TTL), middleware
-        webui/index.html   # Embedded single-page web portal (1732 lines)
+        webui/index.html   # Embedded single-page web portal (4605 lines)
       grpc/                # gRPC service stubs (engagement, operator, OT)
       middleware/          # Middleware stubs (audit, auth, OT auth, rate limit, RBAC)
     build/
@@ -292,7 +292,7 @@ Navigate to `http://127.0.0.1:8080/` after starting the server. Default credenti
 
 ### Large Files
 - `server/api/httpapi/handler.go` (1084 lines): monolithic HTTP router with all REST endpoints inlined as closures. Should be split into per-resource handler files.
-- `server/api/httpapi/webui/index.html` (1732 lines): entire web portal in a single embedded HTML file with inline CSS and JavaScript.
+- `server/api/httpapi/webui/index.html` (4605 lines): entire web portal in a single embedded HTML file with inline CSS and JavaScript.
 - `cmd/client/main.go` (690 lines): all CLI logic, API helpers, and rendering in one file.
 - `cmd/implant/main.go` (419 lines): full implant logic (TLS, registration, beacon loop, task handlers) in one file, bypassing the structured `implant/` packages.
 

@@ -68,3 +68,13 @@ func (d *defaultLister) Kill(_ context.Context, pid int) error {
 	}
 	return proc.Kill()
 }
+
+// Suspend is not implemented on this platform.
+func (d *defaultLister) Suspend(_ context.Context, _ int) error {
+	return fmt.Errorf("process suspend is not supported on %s", runtime.GOOS)
+}
+
+// Resume is not implemented on this platform.
+func (d *defaultLister) Resume(_ context.Context, _ int) error {
+	return fmt.Errorf("process resume is not supported on %s", runtime.GOOS)
+}

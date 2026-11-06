@@ -25,6 +25,7 @@ type Operator struct {
 	Base
 	Name         string       `gorm:"uniqueIndex;not null" json:"name"`
 	Role         string       `gorm:"not null;default:'operator'" json:"role"`
+	PasswordHash []byte       `json:"-"`
 	CertPEM      []byte       `json:"-"`
 	MFAEnabled   bool         `gorm:"default:false" json:"mfa_enabled"`
 	MFASecret    string       `json:"-"`
@@ -71,6 +72,60 @@ type Beacon struct {
 	NextCheckin  time.Time `json:"next_checkin"`
 }
 
+// Task is durable operator intent. Unlike the live in-memory queue it
+// survives disconnects and server restarts, and it is bound to the implant so
+// a reconnecting agent can resume work.
+type Task struct {
+	ID           string     `gorm:"type:uuid;primaryKey" json:"id"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	SessionID    string     `gorm:"index" json:"session_id"`
+	ImplantID    string     `gorm:"index;not null" json:"implant_id"`
+	EngagementID string     `gorm:"index" json:"engagement_id"`
+	Type         string     `gorm:"not null" json:"type"`
+	Args         string     `gorm:"type:text" json:"args"`
+	State        string     `gorm:"index;default:'queued'" json:"state"` // queued|sent|running|completed|failed|expired|cancelled
+	CreatedBy    string     `json:"created_by"`
+	Attempts     int        `gorm:"default:0" json:"attempts"`
+	TimeoutMs    int        `json:"timeout_ms"`
+	SentAt       *time.Time `json:"sent_at,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	ExpiresAt    *time.Time `gorm:"index" json:"expires_at,omitempty"`
+	Error        string     `gorm:"type:text" json:"error,omitempty"`
+}
+
+func (t *Task) BeforeCreate(_ *gorm.DB) error {
+	if t.ID == "" {
+		t.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// TaskResult stores a completed task's output. It deliberately has no
+// gorm.DeletedAt: TaskID is unique and a soft-deleted row would collide with a
+// future insert for the same task.
+type TaskResult struct {
+	ID           string    `gorm:"type:uuid;primaryKey" json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	TaskID       string    `gorm:"uniqueIndex;not null" json:"task_id"`
+	SessionID    string    `gorm:"index" json:"session_id"`
+	EngagementID string    `gorm:"index" json:"engagement_id"`
+	Success      bool      `json:"success"`
+	Output       string    `gorm:"type:text" json:"output"`
+	Error        string    `gorm:"type:text" json:"error,omitempty"`
+	Truncated    bool      `json:"truncated,omitempty"`
+	Bytes        int64     `json:"bytes,omitempty"`
+	CompletedAt  time.Time `gorm:"index" json:"completed_at"`
+}
+
+func (r *TaskResult) BeforeCreate(_ *gorm.DB) error {
+	if r.ID == "" {
+		r.ID = uuid.New().String()
+	}
+	return nil
+}
+
 type Listener struct {
 	Base
 	Type              string `gorm:"not null" json:"type"`
@@ -84,55 +139,68 @@ type Listener struct {
 
 type PayloadArtifact struct {
 	Base
-	CreatedBy    string    `json:"created_by"`
-	TargetOS     string    `json:"target_os"`
-	TargetArch   string    `json:"target_arch"`
-	Mode         string    `json:"mode"`
-	Transports   string    `json:"transports"` // JSON array
-	Format       string    `json:"format"`
-	SHA256       string    `gorm:"uniqueIndex" json:"sha256"`
-	FileSize     int64     `json:"file_size"`
-	ImplantID    string    `gorm:"index" json:"implant_id"`
-	PublicKey    string    `json:"public_key"`
-	EngagementID string    `gorm:"index" json:"engagement_id"`
-	C2ProfileID  string    `json:"c2_profile_id,omitempty"`
+	CreatedBy    string     `json:"created_by"`
+	TargetOS     string     `json:"target_os"`
+	TargetArch   string     `json:"target_arch"`
+	Mode         string     `json:"mode"`
+	Transports   string     `json:"transports"` // JSON array
+	Format       string     `json:"format"`
+	SHA256       string     `gorm:"uniqueIndex" json:"sha256"`
+	FileSize     int64      `json:"file_size"`
+	ImplantID    string     `gorm:"index" json:"implant_id"`
+	PublicKey    string     `json:"public_key"`
+	EngagementID string     `gorm:"index" json:"engagement_id"`
+	C2ProfileID  string     `json:"c2_profile_id,omitempty"`
 	Expiry       *time.Time `json:"expiry,omitempty"`
-	Status       string    `gorm:"default:'active'" json:"status"`
-	BinaryData   []byte    `json:"-"`
+	Status       string     `gorm:"default:'active'" json:"status"`
+	BinaryData   []byte     `json:"-"`
 }
 
 type Engagement struct {
 	Base
-	Name               string     `gorm:"not null" json:"name"`
-	Description        string     `json:"description"`
-	AuthorizationRef   string     `json:"authorization_ref"`
-	Status             string     `gorm:"default:'planning'" json:"status"`
-	ScopeConfig        string     `gorm:"type:text" json:"scope_config"` // JSON
-	TimeWindowStart    *time.Time `json:"time_window_start,omitempty"`
-	TimeWindowEnd      *time.Time `json:"time_window_end,omitempty"`
-	AuthorizedTechniques string   `gorm:"type:text" json:"authorized_techniques"` // JSON array
-	DataCollectionLevel  string   `json:"data_collection_level"`
-	ExfilLimitBytes    int64      `json:"exfil_limit_bytes"`
-	EmergencyContact   string     `json:"emergency_contact"`
-	ProfileConfig      string     `gorm:"type:text" json:"profile_config"` // JSON
-	CreatedBy          string     `json:"created_by"`
+	Name                 string     `gorm:"not null" json:"name"`
+	Description          string     `json:"description"`
+	AuthorizationRef     string     `json:"authorization_ref"`
+	Status               string     `gorm:"default:'planning'" json:"status"`
+	KillSwitchActive     bool       `gorm:"default:false" json:"kill_switch_active"`
+	KilledAt             *time.Time `json:"killed_at,omitempty"`
+	KillReason           string     `json:"kill_reason,omitempty"`
+	ScopeConfig          string     `gorm:"type:text" json:"scope_config"` // JSON
+	TimeWindowStart      *time.Time `json:"time_window_start,omitempty"`
+	TimeWindowEnd        *time.Time `json:"time_window_end,omitempty"`
+	AuthorizedTechniques string     `gorm:"type:text" json:"authorized_techniques"` // JSON array
+	// Capability gates are off by default. Sensitive task categories require
+	// the matching engagement flag (and an explicit authorization reference).
+	AllowPrivilegeEscalation bool   `gorm:"default:false" json:"allow_privilege_escalation"`
+	AllowCredentialAccess    bool   `gorm:"default:false" json:"allow_credential_access"`
+	AllowLateralMovement     bool   `gorm:"default:false" json:"allow_lateral_movement"`
+	AllowPersistence         bool   `gorm:"default:false" json:"allow_persistence"`
+	AllowEvasion             bool   `gorm:"default:false" json:"allow_evasion"`
+	AllowOTAssessment        bool   `gorm:"default:false" json:"allow_ot_assessment"`
+	AllowCodeExecution       bool   `gorm:"default:false" json:"allow_code_execution"`
+	DataCollectionLevel      string `json:"data_collection_level"`
+	ExfilLimitBytes          int64  `json:"exfil_limit_bytes"`
+	EmergencyContact         string `json:"emergency_contact"`
+	ProfileConfig            string `gorm:"type:text" json:"profile_config"` // JSON
+	CreatedBy                string `json:"created_by"`
 }
 
 type AuditEntry struct {
-	ID            string    `gorm:"type:uuid;primaryKey" json:"id"`
-	CreatedAt     time.Time `gorm:"index" json:"created_at"`
-	OperatorID    string    `gorm:"index" json:"operator_id"`
-	EngagementID  string    `gorm:"index" json:"engagement_id"`
-	SessionID     string    `gorm:"index" json:"session_id"`
-	EventType     string    `gorm:"index" json:"event_type"`
-	Action        string    `json:"action"`
-	Target        string    `json:"target"`
-	ResultSummary string    `json:"result_summary"`
-	Metadata      string    `gorm:"type:text" json:"metadata"` // JSON
-	SourceIP      string    `json:"source_ip"`
-	CorrelationID string    `gorm:"index" json:"correlation_id"`
-	PreviousHash  string    `json:"previous_hash"`
-	EntryHash     string    `json:"entry_hash"`
+	ID                string    `gorm:"type:uuid;primaryKey" json:"id"`
+	CreatedAt         time.Time `gorm:"index" json:"created_at"`
+	TimestampUnixNano int64     `gorm:"index" json:"timestamp_unix_nano,omitempty"`
+	OperatorID        string    `gorm:"index" json:"operator_id"`
+	EngagementID      string    `gorm:"index" json:"engagement_id"`
+	SessionID         string    `gorm:"index" json:"session_id"`
+	EventType         string    `gorm:"index" json:"event_type"`
+	Action            string    `json:"action"`
+	Target            string    `json:"target"`
+	ResultSummary     string    `json:"result_summary"`
+	Metadata          string    `gorm:"type:text" json:"metadata"` // JSON
+	SourceIP          string    `json:"source_ip"`
+	CorrelationID     string    `gorm:"index" json:"correlation_id"`
+	PreviousHash      string    `json:"previous_hash"`
+	EntryHash         string    `json:"entry_hash"`
 }
 
 type C2Profile struct {
@@ -148,4 +216,21 @@ type Role struct {
 	Name        string `gorm:"uniqueIndex;not null" json:"name"`
 	Description string `json:"description"`
 	Permissions string `gorm:"type:text" json:"permissions"` // JSON
+}
+
+// LootArtifact is a credential, file, screenshot, or finding captured during
+// an engagement. The blob lives in the server's loot directory; only its
+// metadata is stored in the database. Path is never serialized to operators.
+type LootArtifact struct {
+	Base
+	EngagementID string `gorm:"index" json:"engagement_id"`
+	SessionID    string `gorm:"index" json:"session_id,omitempty"`
+	TaskID       string `gorm:"index" json:"task_id,omitempty"`
+	Operator     string `json:"operator"`
+	Kind         string `gorm:"index" json:"kind"` // credential, file, screenshot, ot_finding, task, other
+	Name         string `json:"name"`
+	SHA256       string `gorm:"index" json:"sha256"`
+	Size         int64  `json:"size"`
+	Path         string `gorm:"type:text" json:"-"`
+	Note         string `gorm:"type:text" json:"note,omitempty"`
 }

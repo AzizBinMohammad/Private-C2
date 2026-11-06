@@ -28,11 +28,16 @@ import (
 )
 
 func init() {
+	// Most tests assert on exact audit-table contents; login events are
+	// covered by a dedicated test.
+	auditAuthEvents = false
 	hash, _ := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.MinCost)
 	newAuthManagerFn = func() *AuthManager {
 		return &AuthManager{
-			users:  map[string][]byte{"admin": hash},
-			tokens: make(map[string]*tokenEntry),
+			users:       map[string][]byte{"admin": hash},
+			roles:       map[string]string{"admin": "admin"},
+			operatorIDs: make(map[string]string),
+			tokens:      make(map[string]*tokenEntry),
 		}
 	}
 }
@@ -1680,10 +1685,13 @@ func TestHTTP_KillswitchEngagement_Success(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var result map[string]string
+	var result map[string]any
 	json.NewDecoder(w.Body).Decode(&result)
 	if result["status"] != "killed" {
-		t.Errorf("status = %q, want %q", result["status"], "killed")
+		t.Errorf("status = %v, want %q", result["status"], "killed")
+	}
+	if _, ok := result["sessions_closed"]; !ok {
+		t.Error("killswitch response is missing sessions_closed")
 	}
 
 	// Verify the DB was updated.
@@ -3064,7 +3072,8 @@ func TestHTTP_OT_Reports_MethodNotAllowed(t *testing.T) {
 	router, _, _ := setupTestRouter(t)
 	token := getAuthToken(t, router)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/ot/reports", nil)
+	// POST now generates a report; an unsupported method still returns 405.
+	req := httptest.NewRequest(http.MethodPut, "/api/ot/reports", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)

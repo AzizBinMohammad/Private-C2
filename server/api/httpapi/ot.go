@@ -3,12 +3,14 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"gorm.io/gorm"
 )
 
 type otHandler struct {
-	db *gorm.DB
+	db      *gorm.DB
+	auditor *audit.Logger
 }
 
 func (oth *otHandler) handleOTAssets(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +107,10 @@ func (oth *otHandler) handleOTReports(w http.ResponseWriter, r *http.Request) {
 	setCORS(w)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method == http.MethodPost {
+		oth.generateOTReport(w, r)
 		return
 	}
 	if r.Method != http.MethodGet {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"gorm.io/gorm"
@@ -67,6 +68,31 @@ func (r *SessionRepository) Unlock(id, operatorID string) error {
 	return result.Error
 }
 
+// Checkin updates the last-seen timestamp and marks the session active.
+func (r *SessionRepository) Checkin(id string, at time.Time) error {
+	return r.db.Model(&models.Session{}).Where("id = ?", id).
+		Updates(map[string]any{"last_checkin": at, "health_status": "active"}).Error
+}
+
+// Disconnect marks a session as disconnected. It is intentionally not a
+// delete: the history remains available to operators.
+func (r *SessionRepository) Disconnect(id string, at time.Time) error {
+	return r.db.Model(&models.Session{}).Where("id = ?", id).
+		Updates(map[string]any{
+			"health_status": "disconnected",
+			"last_checkin":  at,
+		}).Error
+}
+
+// MarkAllLiveDisconnected is called at server startup. Sessions that were
+// active when the process stopped cannot still be live, and must not be shown
+// as such after the restart.
+func (r *SessionRepository) MarkAllLiveDisconnected() error {
+	return r.db.Model(&models.Session{}).
+		Where("health_status IN ?", []string{"active", "stale"}).
+		Update("health_status", "disconnected").Error
+}
+
 func (r *SessionRepository) UpdateHealth(id, status string, latencyMs, jitterMs float64) error {
 	return r.db.Model(&models.Session{}).Where("id = ?", id).
 		Updates(map[string]any{
@@ -76,8 +102,12 @@ func (r *SessionRepository) UpdateHealth(id, status string, latencyMs, jitterMs 
 		}).Error
 }
 
-func (r *SessionRepository) MarkStale() error {
+// MarkStale marks sessions whose last check-in predates before. The previous
+// implementation had no predicate and marked every session stale, including
+// sessions that were actively checking in.
+func (r *SessionRepository) MarkStale(before time.Time) error {
 	return r.db.Model(&models.Session{}).
-		Where("health_status != ?", "lost").
+		Where("health_status IN ?", []string{"active", "stale"}).
+		Where("last_checkin < ?", before).
 		Update("health_status", "stale").Error
 }

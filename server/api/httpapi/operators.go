@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azizbinmohammad/private-c2/server/api/authz"
 	"github.com/azizbinmohammad/private-c2/server/store/models"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -50,23 +51,25 @@ func (oh *operatorHandler) handleOperators(w http.ResponseWriter, r *http.Reques
 		if body.Role == "" {
 			body.Role = "operator"
 		}
-		// Hash the password and store it in CertPEM field as bcrypt hash
+		if !authz.KnownRole(body.Role) {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "unknown role: " + body.Role})
+			return
+		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to hash password"})
 			return
 		}
 		op := models.Operator{
-			Name:    body.Name,
-			Role:    body.Role,
-			CertPEM: hash,
+			Name:         body.Name,
+			Role:         body.Role,
+			PasswordHash: hash,
 		}
 		if err := oh.db.Create(&op).Error; err != nil {
 			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 			return
 		}
-		// Also register the operator in the auth system
-		oh.auth.SetPassword(body.Name, body.Password)
+		oh.auth.SetUser(body.Name, hash, body.Role, op.ID)
 		writeJSON(w, http.StatusCreated, op)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
@@ -89,14 +92,17 @@ func (oh *operatorHandler) handleOperatorDetail(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
 		return
 	}
-	res := oh.db.Where("id = ?", opID).Delete(&models.Operator{})
-	if res.Error != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: res.Error.Error()})
-		return
-	}
-	if res.RowsAffected == 0 {
+	var op models.Operator
+	if err := oh.db.Unscoped().First(&op, "id = ?", opID).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "operator not found"})
 		return
 	}
+	// Hard delete so the unique name can be reused and no soft-deleted row is
+	// left behind; auth credentials and tokens are revoked below.
+	if err := oh.db.Unscoped().Delete(&op).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	oh.auth.RemoveUser(op.Name)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

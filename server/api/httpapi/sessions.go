@@ -4,15 +4,24 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/azizbinmohammad/private-c2/pkg/audit"
+	"github.com/azizbinmohammad/private-c2/pkg/taskargs"
+	"github.com/azizbinmohammad/private-c2/server/api/authz"
 	"github.com/azizbinmohammad/private-c2/server/c2"
+	"github.com/azizbinmohammad/private-c2/server/store/models"
+	"github.com/azizbinmohammad/private-c2/server/store/repository"
+	"gorm.io/gorm"
 )
 
 // sessionHandler serves live implant sessions. Sessions are held in memory
 // (docs/decisions.md), so this handler needs no database access.
 type sessionHandler struct {
 	implantServer *c2.ImplantServer
+	db            *gorm.DB
+	auditor       *audit.Logger
 }
 
 func (sh *sessionHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +50,10 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if path == "history" {
+		sh.handleSessionHistory(w, r)
+		return
+	}
 	parts := strings.SplitN(path, "/", 2)
 	sessionID := parts[0]
 
@@ -91,12 +104,10 @@ func (sh *sessionHandler) handleSessionDetail(w http.ResponseWriter, r *http.Req
 			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "task type is required"})
 			return
 		}
-		taskID, err := sh.implantServer.QueueTask(sessionID, req.Type, req.Args)
-		if err != nil {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusCreated, TaskResponse{TaskID: taskID})
+		sh.submitTask(w, r, sessionID, req.Type, req.Args)
+
+	case "tasks":
+		sh.handleSessionTasks(w, r, sessionID)
 
 	case "lock":
 		if r.Method != http.MethodPost {
@@ -158,9 +169,135 @@ func (sh *sessionHandler) handleTaskResult(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	result := sh.implantServer.GetResult(taskID)
+	if result == nil && sh.db != nil {
+		// Find (rather than First) avoids GORM logging a "record not found"
+		// error on every poll while a task is still running.
+		var row models.TaskResult
+		res := sh.db.Where("task_id = ?", taskID).Limit(1).Find(&row)
+		if res.Error == nil && res.RowsAffected == 1 {
+			writeJSON(w, http.StatusOK, c2.TaskResult{
+				TaskID:      row.TaskID,
+				SessionID:   row.SessionID,
+				Success:     row.Success,
+				Output:      row.Output,
+				Error:       row.Error,
+				Truncated:   row.Truncated,
+				Bytes:       row.Bytes,
+				CompletedAt: row.CompletedAt,
+			})
+			return
+		}
+	}
 	if result == nil {
 		writeJSON(w, http.StatusOK, PendingResponse{Status: "pending"})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (sh *sessionHandler) handleSessionHistory(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
+		return
+	}
+	if sh.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: "database unavailable"})
+		return
+	}
+
+	engagementID := r.URL.Query().Get("engagement_id")
+	limit := parseLimit(r.URL.Query().Get("limit"), 100)
+	rows, err := repository.NewSessionRepository(sh.db).List(engagementID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+// submitTask applies engagement policy, queues a task, and writes the API
+// response. It is shared by direct session tasking and plugin execution.
+func (sh *sessionHandler) submitTask(w http.ResponseWriter, r *http.Request, sessionID, taskType, args string) {
+	sess := sh.implantServer.GetSession(sessionID)
+	if sess == nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "session not found"})
+		return
+	}
+	if err := sh.authorizeTask(sess, taskType, args); err != nil {
+		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	taskID, err := sh.implantServer.QueueTask(sessionID, taskType, args)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, c2.ErrSessionNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, c2.ErrUnsupportedTaskType), errors.Is(err, c2.ErrTaskQueueFull):
+			status = http.StatusBadRequest
+		case errors.Is(err, c2.ErrEngagementKilled):
+			status = http.StatusForbidden
+		}
+		writeJSON(w, status, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if sh.auditor != nil {
+		identity, _ := authz.FromContext(r.Context())
+		operator := identity.OperatorID
+		if operator == "" {
+			operator = identity.Username
+		}
+		_ = sh.auditor.Log(operator, sess.EngagementID, sessionID,
+			audit.EventSessionInteract, "task."+taskType,
+			taskargs.Target(taskType, args), "queued",
+			map[string]any{"task_id": taskID}, r.RemoteAddr, "")
+	}
+	writeJSON(w, http.StatusCreated, TaskResponse{TaskID: taskID})
+}
+
+func (sh *sessionHandler) handleSessionTasks(w http.ResponseWriter, r *http.Request, sessionID string) {
+	setCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
+		return
+	}
+	if sh.db == nil {
+		writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: "database unavailable"})
+		return
+	}
+
+	limit := parseLimit(r.URL.Query().Get("limit"), 100)
+	rows, err := repository.NewTaskRepository(sh.db).ListBySession(sessionID, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+func parseLimit(raw string, def int) int {
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return def
+	}
+	if n > 1000 {
+		return 1000
+	}
+	return n
 }

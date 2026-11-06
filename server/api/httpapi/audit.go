@@ -72,6 +72,50 @@ func (ah *auditHandler) handleAuditDetail(w http.ResponseWriter, r *http.Request
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/audit/")
+	if path == "export" {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
+			return
+		}
+		format := audit.ExportFormat(r.URL.Query().Get("format"))
+		if format == "" {
+			format = audit.FormatJSON
+		}
+		var rows []models.AuditEntry
+		if err := ah.db.Order("created_at ASC").Limit(100000).Find(&rows).Error; err != nil {
+			writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+			return
+		}
+		entries := make([]audit.Entry, 0, len(rows))
+		for _, row := range rows {
+			entry, err := models.AuditEntryToLib(row)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "invalid audit row: " + err.Error()})
+				return
+			}
+			entries = append(entries, entry)
+		}
+
+		ext := string(format)
+		contentType := "application/json"
+		switch format {
+		case audit.FormatCEF, audit.FormatLEEF:
+			contentType = "text/plain"
+		case audit.FormatJSON:
+		default:
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "unsupported export format: " + string(format)})
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"audit.%s\"", ext))
+		if err := audit.Export(w, entries, format); err != nil {
+			// Headers are already written; log the failure in the response body
+			// is not possible. The caller still receives the partial export.
+			return
+		}
+		return
+	}
+
 	if path == "verify" {
 		if r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
@@ -95,14 +139,20 @@ func (ah *auditHandler) handleAuditDetail(w http.ResponseWriter, r *http.Request
 		valid := true
 		brokenAt := -1
 		prevHash := ""
-		for i, entry := range entries {
-			if i > 0 && entry.PreviousHash != prevHash {
+		for i, row := range entries {
+			if i > 0 && row.PreviousHash != prevHash {
 				valid = false
 				brokenAt = i
 				break
 			}
-			prevHash = audit.ComputeHash(entry.ID, entry.CreatedAt, entry.OperatorID, audit.EventType(entry.EventType), entry.Action, entry.PreviousHash)
-			if entry.EntryHash != prevHash {
+			entry, err := models.AuditEntryToLib(row)
+			if err != nil {
+				valid = false
+				brokenAt = i
+				break
+			}
+			prevHash = audit.ComputeEntryHash(entry)
+			if row.EntryHash != prevHash {
 				valid = false
 				brokenAt = i
 				break

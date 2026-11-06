@@ -8,6 +8,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -49,6 +50,7 @@ type runningListener struct {
 	conns    sync.WaitGroup
 	connMu   sync.Mutex
 	connsNow int
+	connSet  map[net.Conn]struct{}
 }
 
 // StartListener binds a listener and begins accepting implant connections.
@@ -75,6 +77,9 @@ func (s *ImplantServer) StartListener(cfg ListenerConfig) (ListenerInfo, error) 
 		id = uuid.New().String()
 	}
 
+	// Reserve the ID and bind while holding the lock. The previous check-then-
+	// insert sequence let two concurrent starts with the same ID both bind,
+	// with the second overwriting the first in the map and leaking its socket.
 	s.mu.Lock()
 	if s.listeners == nil {
 		s.listeners = make(map[string]*runningListener)
@@ -83,11 +88,11 @@ func (s *ImplantServer) StartListener(cfg ListenerConfig) (ListenerInfo, error) 
 		s.mu.Unlock()
 		return ListenerInfo{}, fmt.Errorf("listener %s is already running", id)
 	}
-	s.mu.Unlock()
 
 	addr := net.JoinHostPort(cfg.BindAddr, fmt.Sprintf("%d", cfg.Port))
 	ln, err := tls.Listen("tcp", addr, cfg.TLSConfig)
 	if err != nil {
+		s.mu.Unlock()
 		return ListenerInfo{}, fmt.Errorf("binding %s listener on %s: %w", cfg.Type, addr, err)
 	}
 
@@ -107,11 +112,10 @@ func (s *ImplantServer) StartListener(cfg ListenerConfig) (ListenerInfo, error) 
 			EngagementID: cfg.EngagementID,
 			Status:       "running",
 		},
-		ln:     ln,
-		cancel: cancel,
+		ln:      ln,
+		cancel:  cancel,
+		connSet: make(map[net.Conn]struct{}),
 	}
-
-	s.mu.Lock()
 	s.listeners[id] = rl
 	s.mu.Unlock()
 
@@ -123,6 +127,7 @@ func (s *ImplantServer) StartListener(cfg ListenerConfig) (ListenerInfo, error) 
 
 // acceptLoop serves connections until the listener is stopped.
 func (s *ImplantServer) acceptLoop(ctx context.Context, rl *runningListener) {
+	delay := 50 * time.Millisecond
 	for {
 		conn, err := rl.ln.Accept()
 		if err != nil {
@@ -131,24 +136,40 @@ func (s *ImplantServer) acceptLoop(ctx context.Context, rl *runningListener) {
 				return
 			default:
 			}
-			log.Printf("[c2] listener %s accept error: %v", rl.info.ID, err)
+			// A persistent accept error (EMFILE, transient network failure)
+			// must not turn into a busy spin.
+			log.Printf("[c2] listener %s accept error: %v (retry in %v)", rl.info.ID, err, delay)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return
+			}
+			if delay < 5*time.Second {
+				delay *= 2
+			}
 			continue
 		}
+		delay = 50 * time.Millisecond
 
 		rl.connMu.Lock()
 		rl.connsNow++
+		if rl.connSet == nil {
+			rl.connSet = make(map[net.Conn]struct{})
+		}
+		rl.connSet[conn] = struct{}{}
 		rl.connMu.Unlock()
 		rl.conns.Add(1)
 
-		go func() {
+		go func(c net.Conn) {
 			defer func() {
-				rl.conns.Done()
 				rl.connMu.Lock()
+				delete(rl.connSet, c)
 				rl.connsNow--
 				rl.connMu.Unlock()
+				rl.conns.Done()
 			}()
-			s.HandleConnection(conn)
-		}()
+			s.HandleConnection(c)
+		}(conn)
 	}
 }
 
@@ -169,6 +190,31 @@ func (s *ImplantServer) StopListener(id string) error {
 	if err := rl.ln.Close(); err != nil {
 		log.Printf("[c2] listener %s: closing: %v", id, err)
 	}
+
+	// Close accepted connections so their handler goroutines exit. Waiting
+	// keeps StopListener from returning while sessions still believe they are
+	// served by this listener.
+	rl.connMu.Lock()
+	active := make([]net.Conn, 0, len(rl.connSet))
+	for c := range rl.connSet {
+		active = append(active, c)
+	}
+	rl.connMu.Unlock()
+	for _, c := range active {
+		_ = c.Close()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		rl.conns.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		log.Printf("[c2] listener %s: timed out waiting for %d connection(s) to close", id, len(active))
+	}
+
 	log.Printf("[c2] listener %s stopped", id)
 	return nil
 }

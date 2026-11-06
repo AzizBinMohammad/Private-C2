@@ -20,3 +20,11 @@ certs/
 /cmd/implant/implant
 /cmd/mcp/mcp
 /cmd/server/server
+
+# ---- Local secrets ----
+# .env holds operator/API keys; certs hold private keys. Neither belongs in git.
+.env
+.env.*
+!.env.example
+*.pem
+*.key

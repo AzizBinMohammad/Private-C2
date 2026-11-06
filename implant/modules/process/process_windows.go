@@ -9,6 +9,14 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/windows"
+)
+
+var (
+	modNtdll             = windows.NewLazySystemDLL("ntdll.dll")
+	procNtSuspendProcess = modNtdll.NewProc("NtSuspendProcess")
+	procNtResumeProcess  = modNtdll.NewProc("NtResumeProcess")
 )
 
 type windowsLister struct{}
@@ -72,6 +80,33 @@ func (w *windowsLister) Kill(_ context.Context, pid int) error {
 		return fmt.Errorf("finding process %d: %w", pid, err)
 	}
 	return proc.Kill()
+}
+
+// Suspend stops all threads in the process with NtSuspendProcess.
+func (w *windowsLister) Suspend(_ context.Context, pid int) error {
+	return ntProcessCall(procNtSuspendProcess, pid)
+}
+
+// Resume resumes all threads in the process with NtResumeProcess.
+func (w *windowsLister) Resume(_ context.Context, pid int) error {
+	return ntProcessCall(procNtResumeProcess, pid)
+}
+
+// ntProcessCall opens the target with PROCESS_SUSPEND_RESUME and invokes an
+// ntdll process-state routine. NtSuspendProcess/NtResumeProcess return an
+// NTSTATUS, where zero means success.
+func ntProcessCall(proc *windows.LazyProc, pid int) error {
+	h, err := windows.OpenProcess(windows.PROCESS_SUSPEND_RESUME, false, uint32(pid))
+	if err != nil {
+		return fmt.Errorf("opening process %d: %w", pid, err)
+	}
+	defer windows.CloseHandle(h)
+
+	status, _, _ := proc.Call(uintptr(h))
+	if status != 0 {
+		return fmt.Errorf("%s(pid %d) failed with NTSTATUS 0x%x", proc.Name, pid, status)
+	}
+	return nil
 }
 
 // parseCSVLine parses a simple CSV line, handling quoted fields.

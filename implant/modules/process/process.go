@@ -10,14 +10,16 @@ import (
 type Operation string
 
 const (
-	OpPS   Operation = "ps"
-	OpKill Operation = "kill"
+	OpPS      Operation = "ps"
+	OpKill    Operation = "kill"
+	OpSuspend Operation = "suspend"
+	OpResume  Operation = "resume"
 )
 
 // Request represents a process operation request.
 type Request struct {
 	Op  Operation `json:"op"`
-	PID int       `json:"pid,omitempty"` // for kill
+	PID int       `json:"pid,omitempty"` // for kill/suspend/resume
 }
 
 // ProcessInfo represents information about a running process.
@@ -36,10 +38,12 @@ type Response struct {
 	Processes []ProcessInfo `json:"processes,omitempty"`
 }
 
-// Lister is the platform-specific interface for listing processes.
+// Lister is the platform-specific interface for process operations.
 type Lister interface {
 	List(ctx context.Context) ([]ProcessInfo, error)
 	Kill(ctx context.Context, pid int) error
+	Suspend(ctx context.Context, pid int) error
+	Resume(ctx context.Context, pid int) error
 }
 
 // Execute handles a process operation request using the platform-specific lister.
@@ -69,6 +73,24 @@ func Execute(ctx context.Context, payload []byte) ([]byte, error) {
 			return nil, killErr
 		}
 		resp = &Response{Output: fmt.Sprintf("killed process %d", req.PID)}
+
+	case OpSuspend:
+		if req.PID <= 0 {
+			return nil, fmt.Errorf("invalid PID: %d", req.PID)
+		}
+		if suspendErr := lister.Suspend(ctx, req.PID); suspendErr != nil {
+			return nil, suspendErr
+		}
+		resp = &Response{Output: fmt.Sprintf("suspended process %d", req.PID)}
+
+	case OpResume:
+		if req.PID <= 0 {
+			return nil, fmt.Errorf("invalid PID: %d", req.PID)
+		}
+		if resumeErr := lister.Resume(ctx, req.PID); resumeErr != nil {
+			return nil, resumeErr
+		}
+		resp = &Response{Output: fmt.Sprintf("resumed process %d", req.PID)}
 
 	default:
 		return nil, fmt.Errorf("unknown process operation: %s", req.Op)

@@ -7,7 +7,9 @@ import (
 )
 
 const (
-	MaxMessageSize = 2 << 30 // 2 GB
+	// MaxMessageSize bounds a single frame before allocation. Large transfers
+	// must be chunked; a length prefix is not a licence to allocate gigabytes.
+	MaxMessageSize  = 64 << 20 // 64 MiB
 	LengthFieldSize = 4
 )
 
@@ -31,14 +33,25 @@ func WriteFrame(w io.Writer, data []byte) error {
 	return err
 }
 
+// ReadFrame reads a frame using the default maximum size.
 func ReadFrame(r io.Reader) ([]byte, error) {
+	return ReadFrameWithLimit(r, MaxMessageSize)
+}
+
+// ReadFrameWithLimit reads a frame and rejects an oversized length prefix
+// before allocating the payload buffer. A limit of zero uses MaxMessageSize.
+func ReadFrameWithLimit(r io.Reader, limit uint32) ([]byte, error) {
+	if limit == 0 {
+		limit = MaxMessageSize
+	}
+
 	lengthBuf := make([]byte, LengthFieldSize)
 	if _, err := io.ReadFull(r, lengthBuf); err != nil {
 		return nil, err
 	}
 
 	length := binary.LittleEndian.Uint32(lengthBuf)
-	if length > MaxMessageSize {
+	if length > limit {
 		return nil, ErrMessageTooLarge
 	}
 

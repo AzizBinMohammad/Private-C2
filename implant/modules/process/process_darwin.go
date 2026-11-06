@@ -77,3 +77,27 @@ func (d *darwinLister) Kill(_ context.Context, pid int) error {
 
 	return nil
 }
+
+// Suspend stops the process with SIGSTOP.
+func (d *darwinLister) Suspend(_ context.Context, pid int) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("finding process %d: %w", pid, err)
+	}
+	if err := proc.Signal(syscall.SIGSTOP); err != nil {
+		return fmt.Errorf("suspending process %d: %w", pid, err)
+	}
+	return nil
+}
+
+// Resume continues a stopped process with SIGCONT.
+func (d *darwinLister) Resume(_ context.Context, pid int) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("finding process %d: %w", pid, err)
+	}
+	if err := proc.Signal(syscall.SIGCONT); err != nil {
+		return fmt.Errorf("resuming process %d: %w", pid, err)
+	}
+	return nil
+}

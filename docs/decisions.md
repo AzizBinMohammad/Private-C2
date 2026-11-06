@@ -117,7 +117,7 @@
 
 ## Web Portal: Embedded Single-Page HTML
 
-* **Decision**: The operator web portal is a single HTML file (`server/api/httpapi/webui/index.html`, 1732 lines) with inline CSS and vanilla JavaScript, served via Go's `embed` filesystem at `/`.
+* **Decision**: The operator web portal is a single HTML file (`server/api/httpapi/webui/index.html`, 4605 lines) with inline CSS and vanilla JavaScript, served via Go's `embed` filesystem at `/`.
 * **Why (inferred)**: Zero frontend build toolchain. The portal ships inside the server binary with no separate deployment step. No Node.js, no bundler, no framework dependencies.
 * **What would conflict with it**: Introducing React/Vue/Svelte would require a build pipeline, a separate dev server, and a strategy for embedding the built output. Splitting into multiple files requires updating the embed directive. Any API response shape change requires a manual update to the inline JS.
 
@@ -312,3 +312,268 @@ This project does not appear to be a fork of a public C2 framework (no fork meta
   `scanPollTimeout` or the portal's `taskPollAttempts` would make a running scan
   invisible before it finishes. Persisting results (a planned follow-up) needs a
   result hook in `server/c2`, which today holds live state only in memory.
+
+---
+
+## Protocol v2: Additive Versioning (2026-10-19)
+
+* **Decision**: v2 fields are additive JSON fields negotiated at registration.
+  A missing `protocol_version` is v1. The implant starts in v1 mode and uses v2
+  message types only after the ack advertises a negotiated version >= 2. No v1
+  JSON key is renamed or removed.
+* **Why**: Existing implants must keep working. Additive fields are ignored by
+  old decoders, and the negotiated version prevents a new peer from sending a
+  message an old peer cannot parse.
+* **What would conflict with it**: Renaming fields, removing v1 message shapes,
+  or sending v2 message types before negotiation. Golden JSON fixtures and a
+  legacy client test guard this.
+
+## Durable C2 State: Write-Through, Fail-Closed Queueing (2026-10-19)
+
+* **Decision**: `server/c2.Persistence` is an interface implemented by
+  `GORMPersistence`. Sessions, check-ins, disconnects, task queue/dispatch, and
+  results are written through. A task that cannot be persisted is not accepted
+  into the in-memory queue. Queued tasks are rebound to a reconnecting implant
+  by `ImplantID`.
+* **Why**: The previous in-memory maps lost operator intent on restart, and a
+  failed DB write could leave a task that existed only in memory.
+* **What would conflict with it**: Treating the DB as best-effort for queueing,
+  or rebinding by session ID (which changes on every reconnect).
+
+## HTTP Authorization and Engagement Policy (2026-10-19)
+
+* **Decision**: The REST API uses a deny-by-default role/permission matrix
+  (`server/api/authz`) after bearer authentication. Roles are `admin`,
+  `operator`, `builder`, `observer`, and `ot-operator`. Before a task is
+  queued, the server validates engagement status, kill switch, time window,
+  authorized techniques, and scope; the implant independently re-checks its
+  own safety configuration.
+* **Why**: Authentication alone let any token manage operators or task any
+  implant. Defense in depth matters because legacy implants cannot be trusted
+  to enforce policy.
+* **What would conflict with it**: Adding a protected route without a
+  permission entry (it is denied), or accepting an operator identity from a
+  request body instead of the token.
+
+## Background Task Execution (2026-10-19)
+
+* **Decision**: The implant executes tasks on a bounded `implant/task.Runner`
+  with per-task timeout, panic recovery, duplicate-ID suppression, and output
+  truncation. Results are flushed at the start of each beacon cycle.
+* **Why**: Inline execution blocked check-ins for the duration of a scan or
+  shell command, making the session look stale and delaying all other work.
+* **What would conflict with it**: Reintroducing a synchronous task loop, or
+  removing the duplicate-ID guard while dispatch retries remain possible.
+
+## Kill Switch Semantics (2026-10-19)
+
+* **Decision**: Activating an engagement kill switch marks it in the DB and
+  closes matching live sessions, reaps their queues/results, blocks further
+  tasking, and sends v2 implants a kill tasking. It is not a status flag alone.
+* **Why**: The previous endpoint reported success while implants kept
+  beaconing.
+* **What would conflict with it**: Treating the DB status as the only action,
+  or claiming remote termination of v1 implants (v1 has no kill message).
+
+## HTTPS Carrier: Streaming POST, Same Framed Protocol (2026-10-19)
+
+* **Decision**: The HTTPS carrier is a long-lived POST whose request body is
+  the implant-to-server stream and whose response body is the
+  server-to-implant stream. It reuses the existing register/checkin/result
+  loop rather than introducing a second session model.
+* **Why**: `server/c2/listener/https.go` used a cookie/base64 request-response
+  model that could not accept the live protocol. A streaming adapter keeps one
+  protocol engine and one session identity.
+* **What would conflict with it**: Buffering proxies that cannot stream a
+  request body, or a non-TLS listener. The handler rejects non-TLS requests.
+
+## Payload Builder: Overlay-Injected Config (2026-10-19)
+
+* **Decision**: `server/build.Build` generates a `config_gen.go`, maps it over
+  `cmd/implant/config_gen.go` with `go build -overlay`, and compiles with
+  `CGO_ENABLED=0`. The config embeds endpoints, CA/client certificate PEM,
+  engagement, sleep/jitter, safety limits, and mode. The source tree is not
+  modified.
+* **Why**: Runtime flags made "generated" payloads unusable without an
+  operator-provided command line. Writing generated files into the repo would
+  dirty the tree and race concurrent builds.
+* **What would conflict with it**: Formats that need CGO or a cross-toolchain
+  (DLL/shellcode/shared) are rejected with a clear error. Adding an external
+  builder is the intended path for those.
+
+## Audit: One Canonical Hash, One Writer (2026-10-19)
+
+* **Decision**: `audit.ComputeEntryHash` hashes every field (including
+  engagement, session, target, metadata, source IP, and correlation ID) using
+  timestamp nanoseconds. `auditwriter.Writer` persists the chain and refuses a
+  discontinuity. Verification and export use the same library.
+* **Why**: The previous library and API hashes disagreed, the table had no
+  writer, and fields outside the six-field subset could be tampered with
+  without breaking the chain.
+* **What would conflict with it**: Storing entries without `TimestampUnixNano`,
+  or writing audit rows outside the writer (which would break continuity).
+
+## Process and Token Operations: Gated, Task-Scoped Impersonation (2026-10-19)
+
+* **Decision**: `process_info` is a general task; `process_suspend`,
+  `process_resume`, `getprivs`, and every `token_*` task map to the
+  `privilege` capability and are refused unless the engagement enables
+  privilege escalation on both the server and the implant. Tokens stolen or
+  created during a task live in a per-implant handle store. Impersonation
+  applies a stored token to an OS-thread-locked task, reads back the effective
+  identity, and reverts before the task returns.
+* **Why**: The implant runs tasks on a worker pool. A token left impersonated
+  on a pooled thread could silently change the identity of an unrelated later
+  task. Task-scoped impersonation makes the privilege gate auditable and keeps
+  every task's identity deterministic. Running a child process as the
+  impersonated user needs `CreateProcessWithTokenW` and is deliberately not
+  part of this cut; `Impersonate` proves the token works without pretending
+  the child process inherited it.
+* **What would conflict with it**: Migrating to persistent impersonation
+  requires a dedicated OS-thread-locked worker and a command queue. Do not
+  remove the defer-revert, share the token store across processes, or loosen
+  the privilege category without an engagement-level gate.
+
+## Pivot Scope Is Enforced per Connection (2026-10-19)
+
+* **Decision**: `pivot_socks` and `pivot_portfwd` call the implant's
+  `SafetyChecker.CheckWithTarget` for every CONNECT/dial, not only when the
+  pivot starts. The SOCKS server supports CONNECT only and replies `0x02`
+  (connection not allowed) when the destination is outside scope.
+* **Why**: The operator chooses the destination after the listener is running.
+  A start-time check would authorize an unlimited set of destinations from one
+  task and silently bypass engagement scope.
+* **What would conflict with it**: Adding UDP ASSOCIATE or BIND, or caching
+  allowed destinations, requires an equivalent per-destination check.
+
+## Credential Dumps Stay on the Target Until Retrieved (2026-10-19)
+
+* **Decision**: `credential_dump` writes a minidump or registry hive to a
+  temporary path on the target and returns its path, size, and SHA-256. The
+  operator retrieves it with `download_stat`/`download_chunk`, which enforce
+  the data quota, and can promote it to loot.
+* **Why**: Task results are size-limited and persist in the task-result table;
+  embedding a multi-hundred-megabyte dump in a result would break the wire
+  protocol and the database. The chunked path already provides resumability
+  and hashing.
+* **What would conflict with it**: A dedicated binary task-result channel must
+  preserve quota enforcement, hashing, and audit attribution.
+
+## Persistence Artifacts Have Deterministic IDs (2026-10-19)
+
+* **Decision**: Every persistence artifact derives its ID from
+  `sha256(kind + "\x00" + name)` and embeds it in a marker (shell block, unit
+  comment, crontab comment) or a prefixed Windows name (`pc2-<name>`). `add`,
+  `remove`, and `list` all use that ID.
+* **Why**: Cleanup must work after a server restart or from a different
+  operator session, without a server-side registry of target state. Determinism
+  makes removal idempotent and auditable.
+* **What would conflict with it**: Renaming an artifact without removing the
+  old one creates a second artifact; operators must remove by the original
+  name. `dry_run` exists for review before writing.
+
+## Loot: Metadata in the Database, Blobs on Disk (2026-10-19)
+
+* **Decision**: `LootArtifact` stores engagement/session/task attribution,
+  kind, name, SHA-256, size, and a private path. Bytes live under
+  `PC2_LOOT_DIR` (default `./loot`, 0700) with random UUID filenames.
+* **Why**: Large blobs in SQLite/Postgres make backups, queries, and the audit
+  path slow. The path is never serialized to operators; downloads go through
+  the authenticated API, which also checks the credential gate.
+* **What would conflict with it**: Serving loot from a static file server would
+  bypass RBAC and the credential gate. A distributed deployment needs shared
+  storage or an object-store adapter.
+
+## Execute-Assembly Runs in PowerShell (2026-10-19)
+
+* **Decision**: `execute_assembly` base64-encodes the assembly and invokes its
+  entry point through `Reflection.Assembly.Load` in a PowerShell
+  `-EncodedCommand` process. The implant does not host the CLR.
+* **Why**: In-process CLR hosting requires CGO and a Windows toolchain, and
+  cannot be verified here. The PowerShell path keeps `CGO_ENABLED=0` and gives
+  operators a working primitive with an honest limitation.
+* **What would conflict with it**: A real in-process CLR host must preserve the
+  same capability gate and must not be presented as equivalent in-memory
+  execution.
+
+## In-Memory Code Execution Is a Separate Capability (2026-10-19)
+
+* **Decision**: `inline_execute` maps to a new `execution` category and
+  requires `Engagement.AllowCodeExecution`, the implant's
+  `--allow-code-execution` flag, and the embedded payload flag. Shell,
+  PowerShell, and Python remain general execution primitives.
+* **Why**: A COFF loader accepts arbitrary compiled code and cannot be
+  meaningfully constrained by the shell command allowlist. Making it a distinct
+  gate keeps it off unless an engagement explicitly authorizes in-memory code
+  execution while leaving routine tasking unchanged.
+* **What would conflict with it**: Treating BOF execution as equivalent to
+  shell would let it bypass the capability model. The loader must keep using
+  the same server policy and implant safety checks.
+
+## BOF Loader: AMD64 COFF, Beacon API Subset (2026-10-19)
+
+* **Decision**: `implant/modules/bof` parses AMD64 COFF objects, lays sections
+  out in one image, applies ADDR64/ADDR32/ADDR32NB/REL32 relocations, and runs
+  the `go` entry point in `VirtualAlloc` memory on Windows. Beacon API imports
+  are implemented with `syscall.NewCallback` for output, data parsing, format
+  buffers, admin checks, and token revert.
+* **Why**: This covers common reconnaissance BOFs without CGO and keeps parsing
+  and relocation math unit-testable on Linux.
+* **What would conflict with it**: `BeaconPrintf` is varargs and is not
+  implemented; BOFs importing it fail with an unresolved symbol. i386 COFF and
+  deep-stack BOFs are unsupported until verified on a Windows lab host.
+
+## Plugins Are Manifests, Not Native Code (2026-10-19)
+
+* **Decision**: A plugin is a JSON manifest under `PC2_PLUGIN_DIR` that maps a
+  command name to a registered task type and a Go text/template for arguments.
+  Optional Ed25519 signatures are verified over the canonical manifest;
+  `PC2_PLUGIN_REQUIRE_SIGNED=true` makes signatures mandatory.
+* **Why**: This gives operators reusable, reviewable command definitions
+  without loading untrusted native code into the server, and the template
+  renders arguments that still pass through `authorizeTask`.
+* **What would conflict with it**: In-server scripting or native plugins would
+  bypass the policy path; any future extension must call `submitTask`
+  (or an equivalent policy-checked queue) rather than `QueueTask` directly.
+
+## Loot Encryption and Redaction (2026-10-19)
+
+* **Decision**: Loot blobs are AES-256-GCM encrypted. The key comes from
+  `PC2_LOOT_KEY`, a `0600` `loot.key` file in the loot directory, or is
+  generated on first use. Downloads decrypt transparently; `?redact=true`
+  applies `pkg/redact` to text blobs and refuses binary ones.
+* **Why**: Credentials and captured files are the highest-value data in the
+  system. Encryption at rest protects backups and accidental copies; redaction
+  makes it possible to share a deliverable without leaking secrets.
+* **What would conflict with it**: Serving loot from a static file server
+  bypasses decryption, RBAC, and the credential gate. Rotating the key requires
+  re-encrypting existing blobs or retaining the old key.
+
+## OT Findings Are Imported Through a Gated Endpoint (2026-10-19)
+
+* **Decision**: `POST /api/ot/import` maps an OT task result (or inline items)
+  into the existing OT finding tables, and `POST /api/ot/reports` renders and
+  stores Markdown/JSON assessments. Imports require
+  `Engagement.AllowOTAssessment`.
+* **Why**: OT task output was previously only visible as a task result, which
+  made cross-host assets, topology, compliance, and reporting impossible.
+  Reusing the existing models keeps the schema stable.
+* **What would conflict with it**: Imports without the OT gate, or schema
+  changes that make task output incompatible with the mapping structs.
+
+## Session Elevation Is Reported by the Implant (2026-11-06)
+
+* **Decision**: The implant reports whether it holds admin/root rights in
+  `RegisterData.Elevated` (`euid == 0` on Unix, a UAC-elevated token on
+  Windows). The server keeps it on the live `ImplantSession`, persists it to
+  `models.Session.Elevated`, and exposes it as `elevated` from `/api/sessions`
+  and the beacon view. The portal uses it to mark an owned host as privileged.
+* **Why**: "Which compromised host is SYSTEM/root?" is the first question an
+  operator asks, and it was previously only discoverable by spending a task on
+  `whoami`-style enumeration. It is advisory metadata for the UI, not an
+  authorization signal: tasking remains gated by the engagement policy.
+* **What would conflict with it**: Treating `elevated` as an authorization
+  decision — it is self-reported by the implant and can change
+  (token theft, UAC filtering) mid-session. Implants older than this field
+  report nothing, which decodes as `false`; that must stay a safe default
+  rather than being inferred from the username.
