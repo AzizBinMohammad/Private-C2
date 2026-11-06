@@ -2,7 +2,7 @@
 
 A full-featured Command and Control framework built in Go 1.23 for **authorized penetration testing engagements only**. Designed with safety-first architecture: engagement-scoped operations, fail-closed kill switches, append-only audit logging, and a dedicated OT/ICS assessment interface with hard read-only interlocks.
 
-**Project page:** [azizbinmohammad.github.io](https://azizbinmohammad.github.io/) — the long-form intro with screenshots, the safety model, and what runs today versus what does not.
+**Project page:** [azizbinmohammad.github.io](https://azizbinmohammad.github.io/) — the intro with screenshots, the safety model, and what runs today versus what does not.
 
 ## Features
 
