@@ -2,6 +2,8 @@
 
 A full-featured Command and Control framework built in Go 1.23 for **authorized penetration testing engagements only**. Designed with safety-first architecture: engagement-scoped operations, fail-closed kill switches, append-only audit logging, and a dedicated OT/ICS assessment interface with hard read-only interlocks.
 
+**Project page:** [azizbinmohammad.github.io](https://azizbinmohammad.github.io/) — the long-form intro with screenshots, the safety model, and what runs today versus what does not.
+
 ## Features
 
 - **C2 transport**: live mTLS and streaming-HTTPS carriers with protocol v2 negotiation; DNS, WireGuard, and pivot transport libraries exist but are not yet wired into the live listener path
@@ -18,6 +20,18 @@ A full-featured Command and Control framework built in Go 1.23 for **authorized 
 - **Audit trail**: Append-only with SHA256 hash chaining, exportable as JSON/CEF/LEEF
 - **Compliance**: IEC 62443, NIST SP 800-82, NERC CIP gap analysis
 - **Deployment**: Docker, docker-compose, Makefile with cross-compile targets
+
+## Portal
+
+The web portal is embedded in the server binary — no separate frontend build or deployment. Each
+implant is drawn as a workstation carrying its OS mark; live sessions are ringed, and elevated
+(root/SYSTEM) hosts carry a bolt.
+
+![Sessions view](docs/assets/sessions.png)
+*Sessions — OS mark, liveness and elevation per host.*
+
+![Dashboard](docs/assets/dashboard.png)
+*Dashboard — counters, server runtime, and the recent session tail.*
 
 ## Quick Start
 
