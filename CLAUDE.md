@@ -45,7 +45,7 @@ Private-C2/
                            #   operators, audit, OT endpoints, server status
         auth.go            # Bearer-token auth: bcrypt password hashing, token
                            #   issuance (12h TTL), middleware
-        webui/index.html   # Embedded single-page web portal (1732 lines)
+        webui/index.html   # Embedded single-page web portal (4605 lines)
       grpc/                # gRPC service stubs (engagement, operator, OT)
       middleware/          # Middleware stubs (audit, auth, OT auth, rate limit, RBAC)
     build/

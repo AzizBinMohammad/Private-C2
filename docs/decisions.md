@@ -117,7 +117,7 @@
 
 ## Web Portal: Embedded Single-Page HTML
 
-* **Decision**: The operator web portal is a single HTML file (`server/api/httpapi/webui/index.html`, 1732 lines) with inline CSS and vanilla JavaScript, served via Go's `embed` filesystem at `/`.
+* **Decision**: The operator web portal is a single HTML file (`server/api/httpapi/webui/index.html`, 4605 lines) with inline CSS and vanilla JavaScript, served via Go's `embed` filesystem at `/`.
 * **Why (inferred)**: Zero frontend build toolchain. The portal ships inside the server binary with no separate deployment step. No Node.js, no bundler, no framework dependencies.
 * **What would conflict with it**: Introducing React/Vue/Svelte would require a build pipeline, a separate dev server, and a strategy for embedding the built output. Splitting into multiple files requires updating the embed directive. Any API response shape change requires a manual update to the inline JS.
 
